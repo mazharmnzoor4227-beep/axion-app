@@ -1,0 +1,15 @@
+#!/bin/bash
+# axion-shot <url|file.html> <out.png> [width] [height] — headless Chromium screenshot + console errors (CONSOLE-ERROR lines).
+url="$1"; out="${2:-/tmp/axion-shot.png}"; w="${3:-412}"; h="${4:-915}"
+[ -n "$url" ] || { echo "usage: axion-shot <url|file> <out.png> [w] [h]"; exit 2; }
+case "$url" in http://*|https://*|file://*) ;; *) url="file://$(realpath "$url")";; esac
+if [ "$(id -u)" = 0 ] && [ -z "$AXION_SHOT_ROOT_OK" ]; then echo "NOTE: running as (fake) root; if Chromium crashes, Axion's own check after this turn takes the screenshot." >&2; fi
+command -v chromium >/dev/null || { echo "UNAVAILABLE: Browser automation (Chromium) is not installed — Settings → Developer tools"; exit 3; }
+mkdir -p "$(dirname "$out")"
+nodeglobal="$(npm root -g 2>/dev/null)"
+if [ -n "$nodeglobal" ] && [ -d "$nodeglobal/puppeteer-core" ]; then
+  NODE_PATH="$nodeglobal" timeout -k 5 90 node /opt/axion/devtools/axion-shot.js "$url" "$out" "$w" "$h"; exit $?
+fi
+timeout -k 5 60 chromium --headless --hide-scrollbars --window-size="$w,$h" --virtual-time-budget=4000 --screenshot="$out" --enable-logging=stderr --v=0 "$url" 2>&1 \
+  | grep -E 'CONSOLE|Uncaught' | sed 's/^/CONSOLE-ERROR: /' | head -20
+[ -s "$out" ] && echo "SCREENSHOT: $out" || { echo "Screenshot failed"; exit 1; }

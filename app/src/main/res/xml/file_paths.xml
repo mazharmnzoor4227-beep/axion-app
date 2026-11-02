@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v0.5.2: only these folders can ever be handed to another app (share, open, install). Keys, tokens, chats and the
+     Antigravity sign-ins live elsewhere and can't be reached through Axion's file provider. -->
+<paths>
+    <files-path name="workspace" path="workspace/" />
+    <files-path name="projects" path="projects/" />
+    <cache-path name="updates" path="updates/" />
+    <cache-path name="camera" path="camera/" />
+    <cache-path name="share" path="share/" />
+</paths>

@@ -1,0 +1,2 @@
+llama.cpp dde879bc4f954b809892fd0d660515f42536394a Sun Nov 1 01:46:43 2026 -0500
+Patched: top-level CMakeLists.txt guards add_subdirectory(vendor) since vendor/ is pruned.

@@ -1,0 +1,24 @@
+#!/bin/bash
+# axion-check <project-folder> — quick site check (same rules as the app's SiteChecker): broken local links, viewport, empty page.
+# Prints "PROBLEM: …" lines; exit 1 when there are problems.
+dir="${1:-.}"; cd "$dir" 2>/dev/null || { echo "PROBLEM: folder $dir not found"; exit 1; }
+site=""
+for d in dist build out site docs; do [ -f "$d/index.html" ] && { site="$d"; break; }; done
+[ -z "$site" ] && [ -f index.html ] && site="."
+if [ -z "$site" ]; then
+  if [ -f package.json ]; then echo "PROBLEM: not built yet (no dist/index.html) — run the build"; else echo "PROBLEM: no index.html"; fi
+  exit 1
+fi
+n=0
+while IFS= read -r html; do
+  base="$(dirname "$html")"
+  grep -oE '(src|href)="[^"#?]+' "$html" | sed -E 's/^(src|href)="//' | sort -u | while IFS= read -r ref; do
+    case "$ref" in http:*|https:*|mailto:*|tel:*|data:*|javascript:*|//*|*'{{'*|*'${'*) continue;; esac
+    if [ "${ref#/}" != "$ref" ]; then t="$site/${ref#/}"; else t="$base/$ref"; fi
+    [ -e "$t" ] || [ -e "$t.html" ] || [ -f "$t/index.html" ] || echo "PROBLEM: ${html#./} points to \"$ref\" but it doesn't exist"
+  done
+done < <(find "$site" -name node_modules -prune -o -type f -name '*.html' -print | head -40) | tee /tmp/axion-check.out
+idx="$site/index.html"
+grep -qi 'name="viewport"' "$idx" || echo "PROBLEM: $idx has no viewport meta tag" | tee -a /tmp/axion-check.out
+if [ -s /tmp/axion-check.out ]; then exit 1; fi
+echo "OK: $site looks fine"

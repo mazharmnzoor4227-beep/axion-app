@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "1071482495",
+    "project_id": "axion-d5461",
+    "storage_bucket": "axion-d5461.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1071482495:android:feb4f5afb94890aae1614a",
+        "android_client_info": {
+          "package_name": "com.mazharansari.axion"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1071482495-7gam95goho8of13q76pa62j1gikg4s0m.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mazharansari.axion",
+            "certificate_hash": "29880d1686f9e88270e6c21cbd1045aad2075b04"
+          }
+        },
+        {
+          "client_id": "1071482495-37nso39ts645mdt87vafagabrka26pug.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAOcg4NS9Jrf-ymwFj1tBNSxr7veJus5No"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1071482495-37nso39ts645mdt87vafagabrka26pug.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

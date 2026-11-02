@@ -1,0 +1,9 @@
+{ "version": "2026-11-01",
+  "gemini": { "scope": "project+model", "rpd": { "gemini-3.5-flash-lite": 500, "gemini-3.5-flash": 20 },
+              "src": { "gemini-3.5-flash-lite": "429 body, verified 2026-11-01", "gemini-3.5-flash": "community report, unverified" } },
+  "groq": { "scope": "org", "rpd_default": 1000, "rpd": { "openai/gpt-oss-120b": 1000, "openai/gpt-oss-20b": 1000, "qwen/qwen3.8-27b": 1000 }, "src": "console.groq.com/docs/rate-limits 2026-11-01" },
+  "openrouter": { "scope": "account", "free_rpd_low": 50, "free_rpd_high": 1000 },
+  "sambanova": { "scope": "account", "rpd_default": 20 },
+  "cohere": { "trial_calls_month": 1000 },
+  "pollinations": { "note": "~1 reply / 45 s per IP (measured 2026-11-01)" }
+}

@@ -1,0 +1,35 @@
+# Gradle / build
+.gradle/
+build/
+!app/src/**/build/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# Local config & secrets
+local.properties
+keystore.properties
+keys/
+*.jks
+*.keystore
+*.p12
+*.pem
+.env
+.env.*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs / misc
+*.log
+.navigation/

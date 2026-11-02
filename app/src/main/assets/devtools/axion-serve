@@ -1,0 +1,13 @@
+#!/bin/bash
+# axion-serve <folder> [port] — static server for previews. Uses whatever is installed: python3, node or php.
+dir="${1:-.}"; port="${2:-8080}"
+cd "$dir" || exit 1
+if command -v python3 >/dev/null; then exec python3 -m http.server "$port" --bind 127.0.0.1
+elif command -v node >/dev/null; then exec node -e '
+const http=require("http"),fs=require("fs"),path=require("path");const root=process.cwd();
+const types={html:"text/html",css:"text/css",js:"text/javascript",json:"application/json",svg:"image/svg+xml",png:"image/png",jpg:"image/jpeg",webp:"image/webp"};
+http.createServer((q,s)=>{let p=path.join(root,decodeURIComponent(q.url.split("?")[0]));if(!p.startsWith(root)){s.writeHead(403);return s.end()}
+try{if(fs.statSync(p).isDirectory())p=path.join(p,"index.html")}catch(e){}
+fs.readFile(p,(e,d)=>{if(e){s.writeHead(404);return s.end("404")}s.writeHead(200,{"Content-Type":types[path.extname(p).slice(1)]||"application/octet-stream"});s.end(d)})}).listen(+process.argv[1],"127.0.0.1");' "$port"
+elif command -v php >/dev/null; then exec php -S "127.0.0.1:$port"
+else echo "No server available: install Python, Web (Node) or PHP in Developer tools"; exit 1; fi
