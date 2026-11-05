@@ -28,6 +28,10 @@ data class AppSettings(
     val mode: String = "AUTO",
     /** v0.6 Build: the AI's file changes wait for Approve (diff review) before they touch the project. */
     val reviewBeforeApply: Boolean = true,
+    /** v0.6 Tools library: group id to on/off (missing = the group default; Phone control defaults to OFF). */
+    val toolSwitches: Map<String, Boolean> = emptyMap(),
+    /** v0.6 Phone control: the user read the permission screen and agreed. Without it no phone tool ever runs. */
+    val phoneConsent: Boolean = false,
     val pasteAsFile: String = "Always ask",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,

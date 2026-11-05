@@ -325,6 +325,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * [com.mazharansari.axion.llm.cancelHook]). Nothing that arrives after the tap is added.
      */
     fun stop() {
+        com.mazharansari.axion.phone.PhoneController.stop("You pressed Stop")   // axion-p3: the phone token dies first, instantly
         val j = job ?: return
         job = null
         live?.let { (aid, buf) ->
@@ -434,6 +435,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 override fun artifact(a: Artifact) = synchronized(buf) { buf.artifacts += a; buf.dirty = true }
                 override fun plan(steps: List<PlanStep>) = synchronized(buf) { buf.plan = steps; buf.dirty = true }   // axion-p2
+                override fun usedTool(title: String) = synchronized(buf) { buf.used += title; buf.dirty = true }      // axion-p3
                 override fun model(label: String) = synchronized(buf) { buf.model = label; buf.dirty = true }
                 override fun switching(label: String) = synchronized(buf) { buf.notice = "Switching to $label…"; buf.dirty = true }
                 override fun discardRound() = synchronized(buf) { buf.text.setLength(buf.roundStart); buf.dirty = true }
@@ -447,11 +449,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             var status = MsgStatus.DONE; var error = ""
+            var phoneStarted = false
             try {
                 val pid = projectId
                 if (sec == Section.BUILD && pid != null) withContext(Dispatchers.Default) { runBuildTurn(pid, u, sink) }
                 else withContext(Dispatchers.Default) {
-                    Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }).run(
+                    // axion-p3 phone control: a run token exists only for this turn, only with the user's consent + the switch ON + the service enabled
+                    if (intent == com.mazharansari.axion.agent.Intent.ACTION && s.phoneConsent && com.mazharansari.axion.agent.ToolCatalog.isEnabled("phone_screen", s.toolSwitches) &&
+                        com.mazharansari.axion.phone.PhoneController.beginRun()) {
+                        phoneStarted = true
+                        com.mazharansari.axion.phone.PhoneController.onStopRequested = { viewModelScope.launch(Dispatchers.Main.immediate) { stop() } }
+                    }
+                    Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }).run(
                         history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick) }, sink = sink,
                         profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
                         intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools
@@ -462,6 +471,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             catch (e: LlmException) { status = MsgStatus.ERROR; error = friendly(e) }
             catch (e: Throwable) { status = MsgStatus.ERROR; error = e.message ?: e.toString() }
             ticker.cancel()
+            if (phoneStarted) { com.mazharansari.axion.phone.PhoneController.onStopRequested = null; com.mazharansari.axion.phone.PhoneController.endRun() }   // axion-p3: token ends with the turn
             if (buf.closed) return@launch   // Stop already froze this reply
             withContext(NonCancellable) {
                 live = null
@@ -525,6 +535,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private class StreamBuffer {
         val text = StringBuilder(); val reasoning = StringBuilder(); val steps = ArrayList<Step>(); val artifacts = ArrayList<Artifact>()
         @Volatile var plan: List<PlanStep> = emptyList()   // axion-p2
+        val used = LinkedHashSet<String>()                 // axion-p3: tool groups used (Used tool line)
         var model = ""; var notice = ""; var dirty = false; var roundStart = 0
         @Volatile var closed = false
     }
@@ -537,7 +548,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         val (s0, notice) = snap
         messages = messages.map {
-            if (it.id == id) it.copy(text = s0.first, reasoning = s0.second, steps = s0.third.first, artifacts = s0.third.second, model = s0.third.third, notice = notice, plan = b.plan) else it
+            if (it.id == id) it.copy(text = s0.first, reasoning = s0.second, steps = s0.third.first, artifacts = s0.third.second, model = s0.third.third, notice = notice, plan = b.plan, usedTools = b.used.toList()) else it
         }
         persist()
     }

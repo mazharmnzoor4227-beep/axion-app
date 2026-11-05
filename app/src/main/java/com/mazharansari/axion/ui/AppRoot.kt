@@ -92,6 +92,8 @@ fun AppRoot(vm: ChatViewModel) {
                         Route.Account -> com.mazharansari.axion.ui.auth.AccountScreen(auth, back, onSignIn = { nav(Route.SignIn) },
                             onSignedOut = { stack.clear(); stack.add(Route.Home); vm.g.settings.update { it.copy(guestChosen = false) } })
                         Route.SignIn -> com.mazharansari.axion.ui.auth.SignInScreen(auth, onGuest = null, onDone = back, onClose = back)
+                        Route.ToolsLibrary -> ToolsLibraryScreen(vm, nav, back)
+                        Route.PhoneControl -> PhoneControlScreen(vm, back)
                         Route.Storage -> StorageScreen(vm, back, vm.debugStorage?.first, vm.debugStorage?.second)
                     } }
                 }

@@ -161,6 +161,7 @@ fun AssistantMessage(
         val (docs, images) = m.artifacts.partition { !it.mime.startsWith("image/") }
         docs.forEach { a -> Spacer(Modifier.height(12.dp)); ArtifactCard(a, { onOpenFile(a) }, { onDownload(a) }) }
         if (m.text.isNotBlank()) { Spacer(Modifier.height(12.dp)); Markdown(m.text) }
+        if (m.usedTools.isNotEmpty()) Text((if (m.usedTools.size == 1) "Used tool: " else "Used tools: ") + m.usedTools.joinToString(", "), style = Type.small.copy(fontSize = 13.sp), color = p.text3, modifier = Modifier.padding(top = 10.dp))   // axion-p3
         images.forEach { a -> Spacer(Modifier.height(14.dp)); ImageArtifact(a, { onOpenFile(a) }, { onDownload(a) }) }
         if (m.status == MsgStatus.INTERRUPTED) Text("Response interrupted", style = Type.body, color = p.text2, modifier = Modifier.padding(top = 10.dp))
         if (m.status == MsgStatus.ERROR) ErrorCard(m.error)

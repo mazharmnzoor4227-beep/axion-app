@@ -81,6 +81,8 @@ data class Message(
     val prepMs: Long = 0,
     /** v0.6 (axion-p2): the plan the agent showed for a multi-step task (empty for simple replies). */
     val plan: List<PlanStep> = emptyList(),
+    /** v0.6 Tools library: which tools the agent used for this answer, shown as a Used tool line. */
+    val usedTools: List<String> = emptyList(),
 )
 
 @Serializable

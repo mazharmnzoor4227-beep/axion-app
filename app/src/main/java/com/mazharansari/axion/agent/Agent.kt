@@ -31,6 +31,8 @@ interface AgentSink {
     fun firstToken() {}
     /** v0.6 (axion-p2): the visible plan changed (set / a step started, finished or failed). */
     fun plan(steps: List<com.mazharansari.axion.data.PlanStep>) {}
+    /** v0.6 Tools library: the agent used this tool group (shown under the answer as Used tool). */
+    fun usedTool(title: String) {}
 }
 
 class NoModelException(msg: String) : Exception(msg)
@@ -41,6 +43,8 @@ class Agent(
     private val baseTools: List<Tool> = defaultTools(),
     private val extraTools: suspend () -> List<Tool> = { emptyList() },
     private val maxRounds: Int = 24,
+    /** v0.6 Tools library: group id to on/off, read at the start of every run (so a switch takes effect on the next message). */
+    private val toolSwitches: () -> Map<String, Boolean> = { emptyMap() },
     /** v0.5.1 watchdog (mazhar 3:36 PM, "dusra do" sat in Thinking 26 s+): no answer text within this → next model. */
     private val firstContentMs: Long = 8_000,
     /** …or the stream goes silent this long once it has started → next model. */
@@ -53,7 +57,7 @@ class Agent(
             WebSearchTool(), BrowseTool(), RunCommandTool(), ReadFileTool(), WriteFileTool(), ListFilesTool(),
             ExtractZipTool(), CreatePdfTool(), LoadSkillTool(), InstallSkillsTool(), HttpRequestTool(),
             VideoProbeTool(), VideoEditTool(),   // axion-p1.6
-        )
+        ) + com.mazharansari.axion.phone.PhoneTools.all()   // axion-p3: filtered out unless Tools library → Phone control is ON
     }
 
     suspend fun run(
@@ -69,7 +73,10 @@ class Agent(
         val onPlan = { sink.plan(planState.steps) }
         val wantsPlan = Planner.needsPlan(user.text, intent)
         val planTools: List<Tool> = if (wantsPlan) listOf(PlanSetTool(planState, onPlan), PlanUpdateTool(planState, onPlan)) else emptyList()
-        val all = baseTools + if (intent == Intent.ACTION) runCatching { extraTools() }.getOrDefault(emptyList()) else emptyList()
+        val sw = toolSwitches()
+        val every = baseTools + if (intent == Intent.ACTION) runCatching { extraTools() }.getOrDefault(emptyList()) else emptyList()
+        val all = every.filter { ToolCatalog.isEnabled(it.spec.name, sw) }                       // axion-p3: Tools library switches
+        val offNames = every.map { it.spec.name }.filter { !ToolCatalog.isEnabled(it, sw) }.toSet()
         val tools = when (intent) {
             Intent.CHAT -> emptyList()
             Intent.LOOKUP -> all.filter { it.spec.name in IntentGate.lookupTools }
@@ -80,7 +87,9 @@ class Agent(
         val hint = ScriptHint.note(user.text, history, followUp)
         // Keep requests small (Groq free tier: 8k tokens/min): recent turns verbatim, everything older → "Session notes" (decisions never dropped).
         val folded = HistoryCompressor.compress(history)
-        val sys = systemPrompt(profile, tools, intent) + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "")
+        val sys = systemPrompt(profile, tools, intent) + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
+            (if (intent != Intent.CHAT) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") +
+            (if (tools.any { it.spec.name == "phone_screen" }) "\n\n" + com.mazharansari.axion.phone.PhoneTools.PROMPT else "")
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user
@@ -102,7 +111,7 @@ class Agent(
             for (call in calls) {
                 val tool = byName[call.name]
                 val args = runCatching { Json.parseToJsonElement(call.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
-                if (tool == null) { items += ToolResultItem(call.id, call.name, "Unknown tool ${call.name}"); continue }
+                if (tool == null) { items += ToolResultItem(call.id, call.name, if (call.name in offNames) ToolCatalog.refusalFor(call.name) else "Unknown tool ${call.name}"); continue }
                 if (call.name == Planner.PLAN_SET || call.name == Planner.PLAN_UPDATE) {   // the plan card is its own UI, no step row
                     val o = runCatching { tool.run(args, ctx) }.getOrElse { ToolOutput("Plan error: ${it.message}", isError = true) }
                     items += ToolResultItem(call.id, call.name, o.forModel); continue
@@ -135,6 +144,7 @@ class Agent(
                     output = com.mazharansari.axion.security.SecretScanner.scrub(shown.clip(4000)), endedAt = System.currentTimeMillis(), exitCode = out.exitCode,   // axion-p1.4
                 ))
                 if (!out.isError) out.artifact?.let(sink::artifact)
+                sink.usedTool(ToolCatalog.titleOf(call.name))   // axion-p3: Used tool: …
                 // v0.5.2: a key printed by a command (cat .env, env, a config file) never goes back to the AI provider.
                 items += ToolResultItem(call.id, call.name, com.mazharansari.axion.security.SecretScanner.scrub(outcome.forModel))
                 if (outcome.mustReport) { toolsOff = true; planState.failRunning(out.forModel.lineSequence().firstOrNull().orEmpty()); onPlan() }

@@ -1,0 +1,58 @@
+package com.mazharansari.axion.phone
+
+import com.mazharansari.axion.agent.*
+import com.mazharansari.axion.data.StepKind
+import com.mazharansari.axion.llm.ToolSpec
+import kotlinx.serialization.json.JsonObject
+
+/** v0.6 (Phase 3.2) the agent's phone tools. All of them refuse unless the run token is active (see [PhoneGate]); every refusal and step is logged to the overlay. */
+object PhoneTools {
+    const val NAMES = "phone_screen phone_open_app phone_tap phone_type phone_scroll phone_back phone_home phone_wait"
+    const val PROMPT = "PHONE CONTROL (the user switched it on and is watching a STOP button): drive the phone one small step at a time. " +
+        "Start with phone_open_app (or phone_screen), then ALWAYS call phone_screen to read the numbered elements before tapping/typing, and again after each action. " +
+        "Act with phone_tap(id) / phone_type(id, text, submit) / phone_scroll / phone_back / phone_home. Element numbers change after every action. " +
+        "To search in a browser: open the browser, phone_screen, tap the address/search bar, phone_type the query with submit=true, phone_screen to confirm, then summarise what you see. " +
+        "NEVER operate banking, payment, wallet or password apps and never read or type passwords, PINs, OTPs or card numbers — if blocked, tell the user to do that step themselves. " +
+        "Before anything irreversible (sending a message, deleting, buying, posting) ask the user in chat first. If a tool says Stopped, stop and report where you got to. Keep going until the task is done, then summarise."
+
+    fun all(actions: () -> PhoneActions = { PhoneController.actions }): List<Tool> = listOf(
+        object : PhoneTool("phone_screen", "Read the current phone screen as numbered elements (app name, buttons, fields, text). Call before every tap or type.", schema { }) {
+            override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Reading the screen", "")
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().screen()
+        },
+        object : PhoneTool("phone_open_app", "Open an installed app by name (e.g. Chrome, Settings, YouTube; 'browser' = the default browser). Banking/payment apps are refused.", schema { str("name", "App name") }) {
+            override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Opening app", args.s("name").orEmpty())
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().openApp(args.s("name").orEmpty())
+        },
+        object : PhoneTool("phone_tap", "Tap element [id] from the latest phone_screen. Buttons like Send/Delete/Pay need confirmed=true, which you may set ONLY after the user said yes in chat.",
+            schema { int("id", "Element number", required = true); bool("confirmed", "true only after the user confirmed this irreversible action") }) {
+            override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Tapping", "#" + (args.i("id") ?: 0))
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().tap(args.i("id") ?: -1, args.b("confirmed") == true)
+        },
+        object : PhoneTool("phone_type", "Type text into text field [id] (replaces its content). submit=true presses Enter/Search afterwards. Never for passwords/PINs.",
+            schema { int("id", "Element number of a text field", required = true); str("text", "Text to type"); bool("submit", "Press Enter / Search after typing") }) {
+            override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Typing", args.s("text").orEmpty().take(40))
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().type(args.i("id") ?: -1, args.s("text").orEmpty(), args.b("submit") == true)
+        },
+        object : PhoneTool("phone_scroll", "Scroll the screen: down (see more below), up, left, right.", schema { str("direction", "up | down | left | right") }) {
+            override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Scrolling", args.s("direction").orEmpty())
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().scroll(args.s("direction").orEmpty())
+        },
+        object : PhoneTool("phone_back", "Press the Android Back button.", schema { }) {
+            override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Back", "")
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().back()
+        },
+        object : PhoneTool("phone_home", "Go to the Android home screen.", schema { }) {
+            override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Home", "")
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().home()
+        },
+        object : PhoneTool("phone_wait", "Wait 1-10 seconds for a page or app to load.", schema { int("seconds", "1-10") }) {
+            override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Waiting", "${args.i("seconds") ?: 2}s")
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().waitSec(args.i("seconds") ?: 2)
+        },
+    )
+}
+
+abstract class PhoneTool(name: String, desc: String, params: JsonObject) : Tool {
+    override val spec = ToolSpec(name, desc, params)
+}

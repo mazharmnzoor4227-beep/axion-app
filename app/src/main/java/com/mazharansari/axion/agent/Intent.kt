@@ -19,7 +19,7 @@ object IntentGate {
         "deploy|export|save|edit|fix|debug|refactor|translate this file|summari[sz]e (this|the|my) (file|pdf|doc)|audit|analy[sz]e (this|the|my)|" +
         "bana|banao|banado|bana do|bana dein|bana den|bana dijiye|bnao|bna do|bnado|likh do|likho|likhdo|likh dein|chala do|chalao|chala ke|" +
         "run karo|run kar do|install karo|download karo|download kar do|generate karo|create karo|fix karo|theek karo|thik karo|edit karo|convert karo|" +
-        "trim|kaato|kato|kaat do|kaat dein|lagao|laga do|lagado|reframe)\\b",   // axion-p1.6: video requests
+        "open|tap|click|turn on|turn off|swipe|scroll|kholo|khol do|khol kar|on karo|off karo|band karo|trim|kaato|kato|kaat do|kaat dein|lagao|laga do|lagado|reframe)\\b",   // axion-p1.6: video requests
         RegexOption.IGNORE_CASE,
     )
     private val actionUrdu = Regex("(بنا دو|بناؤ|بنائیں|لکھ دو|لکھو|چلاؤ|چلا دو|ڈاؤن لوڈ|انسٹال)")
