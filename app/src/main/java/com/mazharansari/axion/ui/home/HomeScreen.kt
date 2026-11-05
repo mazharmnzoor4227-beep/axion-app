@@ -113,6 +113,7 @@ fun HomeScreen(vm: ChatViewModel, navigate: (Route) -> Unit, initialDrawer: Bool
             }
             UpdateBanner(vm, navigate)
             if (!(tab == 2 && vm.projectId != null)) TopBar(tab, empty = vm.messages.isEmpty(), onTab = { switchTab(it) }, onMenu = { drawerOpen = true }, onNew = { if (tab == 2) vm.newChat(com.mazharansari.axion.ui.Section.BUILD) else { vm.newChat(com.mazharansari.axion.ui.Section.ASK); tab = 0 } })
+            vm.viewingHtml?.let { a -> com.mazharansari.axion.ui.chat.HtmlPreview(a, onClose = { vm.viewingHtml = null }) }   // axion-p1.3
             vm.viewingPdf?.let { a ->
                 val ctx = LocalContext.current
                 PdfViewer(a, onClose = { vm.viewingPdf = null; vm.debugViewer = null }, onShare = { shareFile(ctx, a) }, onDownload = { vm.toast = FileActions.download(ctx, a) })
@@ -295,7 +296,7 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                             onRegenerate = { vm.regenerate() },
                             onShare = { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, m.text), "Share")) },
                             onRate = { vm.rate(m.id, it) },
-                            onOpenFile = { a -> if (a.mime == "application/pdf") vm.viewingPdf = a else openFile(ctx, a) },
+                            onOpenFile = { a -> if (a.mime == "application/pdf") vm.viewingPdf = a else if (a.mime == "text/html" || a.name.endsWith(".html", true)) vm.viewingHtml = a else openFile(ctx, a) },   // axion-p1.3
                             onDownload = { a -> vm.toast = FileActions.download(ctx, a) },
                         )
                     }

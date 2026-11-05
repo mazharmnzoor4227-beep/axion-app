@@ -50,6 +50,7 @@ class Agent(
         fun defaultTools(): List<Tool> = listOf(
             WebSearchTool(), BrowseTool(), RunCommandTool(), ReadFileTool(), WriteFileTool(), ListFilesTool(),
             ExtractZipTool(), CreatePdfTool(), LoadSkillTool(), InstallSkillsTool(), HttpRequestTool(),
+            VideoProbeTool(), VideoEditTool(),   // axion-p1.6
         )
     }
 
@@ -106,7 +107,7 @@ class Agent(
                 } catch (e: Throwable) { ToolOutput("Tool error: ${e.message}", isError = true) }
                 sink.step(step.copy(
                     title = out.doneTitle ?: label.title, status = if (out.isError) StepStatus.ERROR else StepStatus.DONE,
-                    output = com.mazharansari.axion.security.SecretScanner.scrub(out.display.clip(4000)), endedAt = System.currentTimeMillis(),
+                    output = com.mazharansari.axion.security.SecretScanner.scrub(out.display.clip(4000)), endedAt = System.currentTimeMillis(), exitCode = out.exitCode,   // axion-p1.4
                 ))
                 out.artifact?.let(sink::artifact)
                 // v0.5.2: a key printed by a command (cat .env, env, a config file) never goes back to the AI provider.

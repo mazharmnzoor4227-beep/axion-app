@@ -13,6 +13,8 @@ object FileActions {
     fun download(ctx: Context, a: Artifact): String = runCatching {
         val src = File(a.path)
         com.mazharansari.axion.security.SecretScanner.leaveCheck(src)?.let { return it }
+        // axion-p1.6: videos / audio / pictures go where Gallery and music apps look
+        com.mazharansari.axion.agent.GallerySaver.save(ctx, src, a.mime, a.name)?.let { return "Saved to $it" }
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, a.name)

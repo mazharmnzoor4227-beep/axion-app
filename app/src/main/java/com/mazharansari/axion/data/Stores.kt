@@ -26,6 +26,8 @@ data class AppSettings(
     val instructions: String = "",
     val replyLanguage: String = "",
     val mode: String = "AUTO",
+    /** v0.6 Build: the AI's file changes wait for Approve (diff review) before they touch the project. */
+    val reviewBeforeApply: Boolean = true,
     val pasteAsFile: String = "Always ask",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,

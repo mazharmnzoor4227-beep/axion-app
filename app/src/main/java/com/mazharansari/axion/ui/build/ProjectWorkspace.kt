@@ -73,6 +73,8 @@ fun ProjectWorkspace(vm: ChatViewModel, navigate: (Route) -> Unit) {
     var menu by remember { mutableStateOf(vm.debugProjectMenu) }
     var openFile by rememberSaveable(project.id) { mutableStateOf(vm.debugOpenFile) }
     var deploySheet by remember { mutableStateOf(vm.debugDeploySheet) }
+    var reviewOpen by remember { mutableStateOf(false) }   // axion-p1.2
+    LaunchedEffect(vm.reviewRequested) { if (vm.pendingReview?.projectId == project.id) { reviewOpen = true; tab = 0 } }
     Box(Modifier.fillMaxSize().background(P.bg)) {
         Crossfade(tab, label = "ptab") { t ->
             when (t) {
@@ -90,7 +92,11 @@ fun ProjectWorkspace(vm: ChatViewModel, navigate: (Route) -> Unit) {
             }
         }
         ProjectHeader(project, tab, onTab = { tab = it }, onBack = { vm.closeProject() }, onMenu = { menu = true })
+        vm.pendingReview?.takeIf { it.projectId == project.id }?.let { r ->   // axion-p1.2
+            PendingReviewPill(r.set.changes.size, onClick = { reviewOpen = true }, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 92.dp))
+        }
     }
+    if (reviewOpen && vm.pendingReview != null) ReviewChangesSheet(vm, onDismiss = { reviewOpen = false })   // axion-p1.2
     if (menu) ProjectMenuSheet(vm, project, onDismiss = { menu = false }, onPublish = { menu = false; deploySheet = true }, onFiles = { menu = false; tab = 1 })
     if (deploySheet) DeploySheet(vm, project) { deploySheet = false; vm.debugDeploySheet = false }
 }
@@ -280,6 +286,7 @@ private fun PreviewTab(vm: ChatViewModel, project: Project, onPublish: () -> Uni
     val jobs by g.build.jobs.collectAsState()
     val url = urls[project.id]
     var reload by remember { mutableIntStateOf(0) }
+    LaunchedEffect(vm.previewEpoch) { if (vm.previewEpoch > 0) reload++ }   // axion-p1.2: approved change → preview reloads
     val isAndroid = project.kind == "android" || java.io.File(g.build.folder(project), "settings.gradle.kts").isFile
     val hasSite = remember(project.id, vm.running, reload) { SiteChecker.siteDir(g.build.folder(project)) != null || java.io.File(g.build.folder(project), "package.json").isFile }
     LaunchedEffect(project.id, vm.running, reload) { if (!isAndroid && hasSite && !vm.running && vm.debugProjectTab < 0) runCatching { g.build.startPreview(project) } }
@@ -420,6 +427,8 @@ private fun ProjectMenuSheet(vm: ChatViewModel, project: Project, onDismiss: () 
         SheetRow(Gk.pencil, "Rename", onClick = { rename = true })
         SheetRow(Gk.folder, "Files", onClick = onFiles)
         if (project.kind != "android") SheetRow(Gk.rocket, "Publish", project.deploy?.url?.removePrefix("https://") ?: "Netlify · Vercel · Cloudflare · GitHub Pages", onClick = onPublish)
+        run { val on = vm.g.settings.state.value.reviewBeforeApply   // axion-p1.2
+            SheetRow(Gk.eye, "Review changes before applying", if (on) "On: you approve every AI change first" else "Off: the AI edits your files directly", onClick = { vm.g.settings.update { it.copy(reviewBeforeApply = !on) }; onDismiss() }) }
         if (vm.undoAvailable) SheetRow(Gk.history, "Undo last Build turn", "Put every file back the way it was", onClick = { vm.undoLastBuild(); onDismiss() })
         SheetRow(Gk.newChat, "New chat in this project", "Same files, fresh conversation", onClick = { vm.newChat(com.mazharansari.axion.ui.Section.BUILD); onDismiss() })
         SheetRow(Gk.trash, "Delete project", "Removes its folder and files", color = BRed, onClick = { confirmDelete = true })

@@ -244,21 +244,29 @@ fun BashCard(s: Step) {
             GkIcon(Gk.terminal, null, 16.dp, p.text)
             Spacer(Modifier.width(8.dp))
             Text("Bash", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = p.text, modifier = Modifier.weight(1f))
-            when (s.status) {
-                StepStatus.RUNNING -> PulseDot()
-                StepStatus.ERROR -> GkIcon(Gk.info, null, 16.dp, p.danger)
-                StepStatus.DONE -> {}
+            // axion-p1.4: explicit result chip — Running… / Done · exit 0 / Failed · exit N / Timed out / Stopped
+            val st = remember(s.status, s.exitCode, s.output) { com.mazharansari.axion.agent.CommandStatusLogic.status(s.status, s.exitCode, s.output) }
+            val chipColor = when (st.kind) { com.mazharansari.axion.agent.CommandStatusLogic.Kind.OK -> Color(0xFF3FB950); com.mazharansari.axion.agent.CommandStatusLogic.Kind.RUNNING -> p.text2
+                com.mazharansari.axion.agent.CommandStatusLogic.Kind.STOPPED -> p.text2; else -> p.danger }
+            Row(Modifier.clip(RoundedCornerShape(50)).background(chipColor.copy(alpha = 0.14f)).padding(horizontal = 9.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (st.kind == com.mazharansari.axion.agent.CommandStatusLogic.Kind.RUNNING) { PulseDot(); Spacer(Modifier.width(6.dp)) }
+                Text(st.label, style = Type.small.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = chipColor)
             }
-            IconTap(Gk.copy, "Copy", 18.dp, p.text2, 36.dp) { clip.setText(androidx.compose.ui.text.AnnotatedString(s.target)) }
+            IconTap(Gk.copy, "Copy", 18.dp, p.text2, 36.dp) { clip.setText(androidx.compose.ui.text.AnnotatedString(s.target + if (s.output.isNotBlank()) "\n\n" + com.mazharansari.axion.agent.CommandStatusLogic.body(s.output) else "")) }
         }
         val code = remember(s.target, s.output) {
             buildAnnotatedString {
-                s.target.lines().forEach { line ->
+                s.target.lines().forEachIndexed { li, line ->
+                    if (li == 0) withStyle(SpanStyle(color = Color(0xFF6E6E6E))) { append("$ ") }   // axion-p1.4: prompt
                     val shell = Regex("^\\s*(cd|ls|cat|echo|python3?|pip|npm|node|curl|wget|grep|find|mkdir|rm|cp|mv|unzip|zip|git|chmod|sed|awk|head|tail|wc)\\b").containsMatchIn(line)
                     withStyle(SpanStyle(color = if (shell) Color(0xFFCACBB2) else Color(0xFFB38F82))) { append(line) }
                     append('\n')
                 }
-                if (s.output.isNotBlank()) withStyle(SpanStyle(color = Color(0xFF8A8A8A))) { append(s.output.takeLast(3000)) }
+                if (s.output.isNotBlank()) {   // axion-p1.4: output tailed to the last 200 lines; the chip shows the exit status
+                    val (tailed, hidden) = com.mazharansari.axion.agent.CommandStatusLogic.tail(com.mazharansari.axion.agent.CommandStatusLogic.body(s.output).takeLast(12000), 200)
+                    if (hidden > 0) withStyle(SpanStyle(color = Color(0xFF6E6E6E))) { append("… $hidden earlier lines hidden\n") }
+                    withStyle(SpanStyle(color = Color(0xFF8A8A8A))) { append(tailed) }
+                }
             }
         }
         Box(Modifier.fillMaxWidth().animateContentSize(tween(180)).then(if (open) Modifier else Modifier.heightIn(max = 132.dp))

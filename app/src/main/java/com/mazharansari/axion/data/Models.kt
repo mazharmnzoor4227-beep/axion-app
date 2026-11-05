@@ -25,6 +25,8 @@ data class Step(
     val endedAt: Long = 0,
     /** v0.3: the full content behind the step (the code a write_file wrote, the PDF's markdown) — shown when the row is tapped. */
     val detail: String = "",
+    /** v0.6 (axion-p1.4): exit code of a finished command (null = unknown / not a command). -1 = timed out. */
+    val exitCode: Int? = null,
 )
 
 @Serializable

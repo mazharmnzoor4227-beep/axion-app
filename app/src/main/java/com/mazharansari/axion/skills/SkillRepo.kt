@@ -163,7 +163,7 @@ class SkillRepo(private val ctx: Context?, private val dir: File) {
     }
 
     companion object {
-        val BUILT_IN = listOf("pdf", "website-audit", "deep-research", "roman-urdu")
+        val BUILT_IN = listOf("pdf", "website-audit", "deep-research", "roman-urdu", "video")
         fun frontMatter(text: String, fallback: String): Pair<String, String> {
             val fm = Regex("^---\\s*\\n(.*?)\\n---", RegexOption.DOT_MATCHES_ALL).find(text.trimStart())?.groupValues?.get(1).orEmpty()
             fun field(k: String) = Regex("^$k:\\s*(.+)$", RegexOption.MULTILINE).find(fm)?.groupValues?.get(1)?.trim()?.trim('"', '\'')

@@ -65,6 +65,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     var debugEagerClients = false
     /** The PDF open in Axion's full-screen viewer (drawn over the whole Home, top bar included). */
     var viewingPdf by mutableStateOf<com.mazharansari.axion.data.Artifact?>(null)
+    /** axion-p1.3: an .html the agent wrote, previewed inside Axion. */
+    var viewingHtml by mutableStateOf<com.mazharansari.axion.data.Artifact?>(null)
 
     fun shareConversation(id: String) = viewModelScope.launch {
         val c = g.chats.load(id) ?: return@launch
@@ -113,10 +115,63 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val undoPoints = HashMap<String, Map<String, String>>()
     var undoAvailable by mutableStateOf(false); private set
 
+    // ── axion-p1.2 diff review gate: the AI's changes wait here until the user approves them ─────────────────────────
+    data class Review(val projectId: String, val set: com.mazharansari.axion.build.ChangeGate.ChangeSet)
+    var pendingReview by mutableStateOf<Review?>(null); private set
+    /** Bumped when a change is approved so the Preview tab reloads. */
+    var previewEpoch by mutableIntStateOf(0); private set
+    /** Bumped to ask the Build screen to open the review sheet. */
+    var reviewRequested by mutableIntStateOf(0); private set
+    private var reviewNote: String? = null
+    private fun pendingDir(p: com.mazharansari.axion.data.Project) = com.mazharansari.axion.build.ChangeGate.pendingDir(g.build.store.dir, p.slug)
+    fun reviewTexts(c: com.mazharansari.axion.build.ChangeGate.FileChange): Pair<String?, String?> {
+        val p = g.build.store.get(pendingReview?.projectId) ?: return null to null
+        return com.mazharansari.axion.build.ChangeGate.texts(pendingDir(p), c)
+    }
+    /** Opening a project: restore it if a turn was cut off mid-way, and bring back a review that was still waiting. */
+    private fun loadPending(p: com.mazharansari.axion.data.Project) = viewModelScope.launch(Dispatchers.IO) {
+        val dir = pendingDir(p)
+        val restored = com.mazharansari.axion.build.ChangeGate.recoverIfInterrupted(g.build.folder(p), dir)
+        val set = com.mazharansari.axion.build.ChangeGate.load(dir)
+        withContext(Dispatchers.Main) {
+            if (restored) toast = "A Build turn was interrupted — your project is back to how it was."
+            if (set != null && !set.isEmpty && projectId == p.id) { pendingReview = Review(p.id, set); reviewRequested++ } else if (projectId == p.id) pendingReview = null
+        }
+    }
+    fun approveReview(selected: Set<String>) {
+        val r = pendingReview ?: return; val p = g.build.store.get(r.projectId) ?: return
+        val dir = pendingDir(p); val folder = g.build.folder(p)
+        viewModelScope.launch(Dispatchers.IO) {
+            val before = com.mazharansari.axion.build.ProjectFiles.snapshot(folder)
+            val rejected = r.set.changes.map { it.path }.filter { it !in selected }
+            val applied = runCatching { com.mazharansari.axion.build.ChangeGate.apply(folder, dir, r.set, selected) }
+            if (applied.isFailure) { withContext(Dispatchers.Main) { toast = "Could not apply the changes: ${applied.exceptionOrNull()?.message}" }; return@launch }
+            com.mazharansari.axion.build.ChangeGate.discard(dir)
+            withContext(Dispatchers.Main) {
+                pendingReview = null
+                if (applied.getOrThrow().isNotEmpty()) { undoPoints[p.id] = before; undoAvailable = projectId == p.id; previewEpoch++ }
+                reviewNote = if (rejected.isEmpty()) null else "(The user did NOT approve your changes to: ${rejected.take(12).joinToString()}. Those files are exactly as they were before your last turn; re-read them before editing.)"
+                toast = "Applied ${applied.getOrThrow().size} file${if (applied.getOrThrow().size == 1) "" else "s"}"
+            }
+        }
+    }
+    fun rejectReview() {
+        val r = pendingReview ?: return; val p = g.build.store.get(r.projectId) ?: return
+        val dir = pendingDir(p)
+        viewModelScope.launch(Dispatchers.IO) {
+            com.mazharansari.axion.build.ChangeGate.discard(dir)
+            withContext(Dispatchers.Main) {
+                pendingReview = null
+                reviewNote = "(The user REJECTED your last changes. The project is exactly as it was before that turn; nothing you wrote was kept. Re-read files before editing.)"
+                toast = "Changes rejected — project unchanged"
+            }
+        }
+    }
+
     fun openProject(id: String) {
         val p = g.build.store.get(id) ?: return
         stop()
-        projectId = id; section = Section.BUILD; undoAvailable = undoPoints.containsKey(id)
+        projectId = id; section = Section.BUILD; undoAvailable = undoPoints.containsKey(id); pendingReview = null; loadPending(p)   // axion-p1.2
         conversationId = null; title = p.name; messages = emptyList(); pending.clear(); draft = ""
         p.conversationId?.let { cid ->
             viewModelScope.launch {
@@ -165,6 +220,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             section = Section.of(c.section)
             projectId = if (section == Section.BUILD) g.build.store.projectFor(c.id)?.id else null
             undoAvailable = projectId?.let { undoPoints.containsKey(it) } == true
+            pendingReview = null; projectId?.let { id -> g.build.store.get(id)?.let { loadPending(it) } }   // axion-p1.2
         }
     }
 
@@ -211,6 +267,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(textIn: String = draft) {
         var text = textIn.trim()
         if ((text.isEmpty() && pending.isEmpty()) || running) return
+        if (section == Section.BUILD && pendingReview != null) { toast = "Review the waiting changes first — Approve or Reject."; reviewRequested++; return }   // axion-p1.2
         sendTappedAt = System.currentTimeMillis()
         // v0.5.2 security: an API key pasted into the chat is never sent to the AI or saved — it's masked (gsk_••••abcd).
         if (com.mazharansari.axion.security.SecretScanner.contains(text)) {
@@ -440,8 +497,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val loop = com.mazharansari.axion.build.BuildLoop(
             com.mazharansari.axion.build.AgyBrain(g.linux, g.agy, g.build.store, g.quota), g.build.verifier(), folder, g.build.guest(p), sink,
         )
-        val out = loop.run(p, u.text + note, fresh = p.agyConversation == null)
-        if (out.changedFiles.isNotEmpty()) { undoPoints[pid] = loop.before; withContext(Dispatchers.Main) { undoAvailable = projectId == pid } }
+        // axion-p1.2: with review on, the project folder is backed up first and put back after the turn; the change waits for Approve.
+        val dir = pendingDir(p)
+        var gated = false
+        if (g.settings.state.value.reviewBeforeApply) {
+            gated = try { withContext(Dispatchers.IO) { com.mazharansari.axion.build.ChangeGate.backup(folder, dir) }; true }
+            catch (e: com.mazharansari.axion.build.ChangeGate.TooLargeException) { sink.reasoning("This project is too big to hold changes for review (${e.message}); changes apply directly.\n"); false }
+        }
+        val rn = reviewNote.also { reviewNote = null }
+        val out = try { loop.run(p, (rn?.let { it + "\n\n" } ?: "") + u.text + note, fresh = p.agyConversation == null) }
+        finally {
+            if (gated) withContext(NonCancellable + Dispatchers.IO) {
+                val set = com.mazharansari.axion.build.ChangeGate.stage(folder, dir)
+                withContext(Dispatchers.Main) {
+                    if (set.isEmpty) { com.mazharansari.axion.build.ChangeGate.discard(dir) }
+                    else { pendingReview = Review(pid, set); reviewRequested++; sink.text("\n\n**${set.changes.size} file change${if (set.changes.size == 1) "" else "s"} waiting for your review** (+${set.totalAdded} −${set.totalRemoved}). Nothing is applied until you tap Approve.") }
+                }
+            }
+        }
+        if (!gated && out.changedFiles.isNotEmpty()) { undoPoints[pid] = loop.before; withContext(Dispatchers.Main) { undoAvailable = projectId == pid } }
         if (out.error != null && out.changedFiles.isEmpty()) throw NoModelException(out.error)
         if (out.problems.isNotEmpty()) sink.text("\n\n**Still not fixed after ${out.rounds} rounds:**\n" + out.problems.take(6).joinToString("\n") { "- " + it.lines().first() })
     }

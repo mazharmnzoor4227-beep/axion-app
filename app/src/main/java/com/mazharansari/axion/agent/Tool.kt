@@ -14,6 +14,8 @@ data class ToolOutput(
     val isError: Boolean = false,
     /** Optional replacement for the step title once finished, e.g. "Browsed 3 pages". */
     val doneTitle: String? = null,
+    /** axion-p1.4: exit code for run_command (-1 = timed out). */
+    val exitCode: Int? = null,
 )
 
 data class StepLabel(val kind: StepKind, val title: String, val target: String)

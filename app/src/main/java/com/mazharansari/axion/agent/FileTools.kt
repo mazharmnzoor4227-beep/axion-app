@@ -29,7 +29,7 @@ class RunCommandTool : Tool {
                 catch (e: CancellationException) { throw e } catch (e: Throwable) { return@withContext ToolOutput("Linux error: ${e.message}", isError = true) }
             val head = if (code == -1) "[timed out after ${timeout}s]\n" else if (code != 0) "[exit code $code]\n" else ""
             val body = text.ifEmpty { "(no output)" }
-            return@withContext ToolOutput((head + body).clip(10000), display = (head + body).clip(4000), isError = code != 0)
+            return@withContext ToolOutput((head + body).clip(10000), display = (head + body).clip(4000), isError = code != 0, exitCode = code)
         }
         val sh = if (File("/system/bin/sh").exists()) "/system/bin/sh" else "/bin/sh"
         val pb = ProcessBuilder(sh, "-c", cmd).directory(ctx.workspace.root).redirectErrorStream(true)
@@ -55,7 +55,7 @@ class RunCommandTool : Tool {
         val code = if (finished) proc.exitValue() else -1
         val text = synchronized(out) { out.toString() }.ifEmpty { "(no output)" }
         val head = if (!finished) "[timed out after ${timeout}s]\n" else if (code != 0) "[exit code $code]\n" else ""
-        ToolOutput((head + text).clip(10000), display = (head + text).clip(4000), isError = code != 0)
+        ToolOutput((head + text).clip(10000), display = (head + text).clip(4000), isError = code != 0, exitCode = code)
     }
 }
 
