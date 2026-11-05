@@ -29,6 +29,8 @@ interface AgentSink {
     fun requestStart() {}
     /** v0.5.2 timing: the first answer token (or visible thinking token) of the turn arrived. */
     fun firstToken() {}
+    /** v0.6 (axion-p2): the visible plan changed (set / a step started, finished or failed). */
+    fun plan(steps: List<com.mazharansari.axion.data.PlanStep>) {}
 }
 
 class NoModelException(msg: String) : Exception(msg)
@@ -62,33 +64,50 @@ class Agent(
         profile: Profile = Profile(),
         intent: Intent = Intent.ACTION,
     ): String {
+        // axion-p2: strategy = PLAN (only plan_set offered) → EXECUTE (all tools, guarded by FaultPolicy) → FINISH; old turns folded into session notes.
+        val planState = PlanState()
+        val onPlan = { sink.plan(planState.steps) }
+        val wantsPlan = Planner.needsPlan(user.text, intent)
+        val planTools: List<Tool> = if (wantsPlan) listOf(PlanSetTool(planState, onPlan), PlanUpdateTool(planState, onPlan)) else emptyList()
         val all = baseTools + if (intent == Intent.ACTION) runCatching { extraTools() }.getOrDefault(emptyList()) else emptyList()
         val tools = when (intent) {
             Intent.CHAT -> emptyList()
             Intent.LOOKUP -> all.filter { it.spec.name in IntentGate.lookupTools }
             Intent.ACTION -> all
-        }
+        } + planTools
         val byName = tools.associateBy { it.spec.name }
         val followUp = IntentGate.isFollowUp(user.text)
         val hint = ScriptHint.note(user.text, history, followUp)
-        val items = mutableListOf<ChatItem>(SystemItem(systemPrompt(profile, tools, intent) + hint))
-        // Keep requests small (Groq free tier: 8k tokens/min): recent history only, long old answers clipped.
-        items += history.takeLast(16).mapIndexed { i, it -> if (it is AssistantItem && i < 12 && it.text.length > 1800) AssistantItem(it.text.take(1800) + " …") else it }
+        // Keep requests small (Groq free tier: 8k tokens/min): recent turns verbatim, everything older → "Session notes" (decisions never dropped).
+        val folded = HistoryCompressor.compress(history)
+        val sys = systemPrompt(profile, tools, intent) + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "")
+        val items = mutableListOf<ChatItem>(SystemItem(sys))
+        items += folded.recent
         items += user
         val answer = StringBuilder()
         val quick = IntentGate.isSmallTalk(user.text, intent)
         // v0.5.1: short/simple prompts ask reasoning models to think little (gpt-oss: reasoning_effort "low").
         val effort = if (quick || (intent == Intent.CHAT && user.text.trim().length <= 160)) "low" else null
+        var planPhase = wantsPlan && tools.any { it.spec.name == Planner.PLAN_SET }
+        var toolsOff = false
+        val policy = FaultPolicy()
         repeat(maxRounds) { round ->
-            val (text, calls) = streamOnce(items, tools.map { it.spec }, attempts, sink, quick, effort)
+            val specs = when { toolsOff -> emptyList(); planPhase -> listOf(Planner.planSetSpec); else -> tools.map { it.spec } }
+            val (text, calls) = streamOnce(HistoryCompressor.compressRun(items), specs, attempts, sink, quick, effort)
+            planPhase = false
             items += AssistantItem(text, calls)
-            if (calls.isEmpty()) { answer.append(text); return answer.toString() }
+            if (calls.isEmpty()) { answer.append(text); if (planState.active) { planState.finish(ok = !toolsOff, reason = "stopped early"); onPlan() }; return answer.toString() }
             if (text.isNotBlank()) sink.textToThoughts()
             val ctx = ToolContext(workspace, skills)
             for (call in calls) {
                 val tool = byName[call.name]
                 val args = runCatching { Json.parseToJsonElement(call.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
                 if (tool == null) { items += ToolResultItem(call.id, call.name, "Unknown tool ${call.name}"); continue }
+                if (call.name == Planner.PLAN_SET || call.name == Planner.PLAN_UPDATE) {   // the plan card is its own UI, no step row
+                    val o = runCatching { tool.run(args, ctx) }.getOrElse { ToolOutput("Plan error: ${it.message}", isError = true) }
+                    items += ToolResultItem(call.id, call.name, o.forModel); continue
+                }
+                if (toolsOff) { items += ToolResultItem(call.id, call.name, "Tools are switched off for the rest of this task. Explain to the user what failed and why."); continue }
                 val label = tool.label(args)
                 val detail = when (call.name) {
                     "write_file" -> (args["content"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
@@ -102,19 +121,27 @@ class Agent(
                     val now = System.currentTimeMillis()
                     if (now - lastPush > 250) { lastPush = now; sink.step(step.copy(output = com.mazharansari.axion.security.SecretScanner.scrub(partial))) }
                 }
-                val out = try { tool.run(args, live) } catch (e: CancellationException) {
+                val outcome = try {
+                    policy.execute(call.name, call.arguments, FaultPolicy.timeoutFor(call.name, args), onRetry = { sink.step(step.copy(title = "Retrying…")) }) { tool.run(args, live) }
+                } catch (e: CancellationException) {
                     sink.step(step.copy(status = StepStatus.ERROR, output = "Stopped", endedAt = System.currentTimeMillis())); throw e
-                } catch (e: Throwable) { ToolOutput("Tool error: ${e.message}", isError = true) }
+                }
+                val out = outcome.output
+                val failedKind = outcome.kind == FaultPolicy.Kind.FAILED || outcome.kind == FaultPolicy.Kind.TIMED_OUT || outcome.kind == FaultPolicy.Kind.SKIPPED_REPEAT || outcome.kind == FaultPolicy.Kind.BUDGET
+                val doneTitle = (out.doneTitle ?: label.title) + if (outcome.kind == FaultPolicy.Kind.RETRIED_OK) " (retried)" else ""
+                val shown = if (failedKind) (if (outcome.mustReport) "Gave up: " else "Trying another way — ") + out.display.take(300) else out.display
                 sink.step(step.copy(
-                    title = out.doneTitle ?: label.title, status = if (out.isError) StepStatus.ERROR else StepStatus.DONE,
-                    output = com.mazharansari.axion.security.SecretScanner.scrub(out.display.clip(4000)), endedAt = System.currentTimeMillis(), exitCode = out.exitCode,   // axion-p1.4
+                    title = doneTitle, status = if (out.isError) StepStatus.ERROR else StepStatus.DONE,
+                    output = com.mazharansari.axion.security.SecretScanner.scrub(shown.clip(4000)), endedAt = System.currentTimeMillis(), exitCode = out.exitCode,   // axion-p1.4
                 ))
-                out.artifact?.let(sink::artifact)
+                if (!out.isError) out.artifact?.let(sink::artifact)
                 // v0.5.2: a key printed by a command (cat .env, env, a config file) never goes back to the AI provider.
-                items += ToolResultItem(call.id, call.name, com.mazharansari.axion.security.SecretScanner.scrub(out.forModel))
+                items += ToolResultItem(call.id, call.name, com.mazharansari.axion.security.SecretScanner.scrub(outcome.forModel))
+                if (outcome.mustReport) { toolsOff = true; planState.failRunning(out.forModel.lineSequence().firstOrNull().orEmpty()); onPlan() }
             }
             if (round == maxRounds - 2) items += UserItem("(System note: you are near the step limit. Finish now with your best answer.)")
         }
+        if (planState.active) { planState.finish(ok = false, reason = "step limit"); onPlan() }
         return answer.toString()
     }
 

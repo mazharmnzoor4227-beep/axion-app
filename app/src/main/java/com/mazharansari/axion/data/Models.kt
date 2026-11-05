@@ -29,6 +29,13 @@ data class Step(
     val exitCode: Int? = null,
 )
 
+/** v0.6 (axion-p2) the agent's visible plan: numbered steps with a live status. */
+@Serializable
+enum class PlanStatus { PENDING, RUNNING, DONE, FAILED }
+
+@Serializable
+data class PlanStep(val text: String, val status: PlanStatus = PlanStatus.PENDING, val note: String = "")
+
 @Serializable
 data class Attachment(
     val name: String,
@@ -72,6 +79,8 @@ data class Message(
     /** v0.5.2: ms from tapping Send to the first answer word on screen, and how much of that was Axion itself (before the request left). */
     val firstWordMs: Long = 0,
     val prepMs: Long = 0,
+    /** v0.6 (axion-p2): the plan the agent showed for a multi-step task (empty for simple replies). */
+    val plan: List<PlanStep> = emptyList(),
 )
 
 @Serializable

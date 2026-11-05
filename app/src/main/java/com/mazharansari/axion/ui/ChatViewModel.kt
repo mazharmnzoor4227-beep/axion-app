@@ -433,6 +433,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     buf.roundStart = buf.text.length; buf.dirty = true
                 }
                 override fun artifact(a: Artifact) = synchronized(buf) { buf.artifacts += a; buf.dirty = true }
+                override fun plan(steps: List<PlanStep>) = synchronized(buf) { buf.plan = steps; buf.dirty = true }   // axion-p2
                 override fun model(label: String) = synchronized(buf) { buf.model = label; buf.dirty = true }
                 override fun switching(label: String) = synchronized(buf) { buf.notice = "Switching to $label…"; buf.dirty = true }
                 override fun discardRound() = synchronized(buf) { buf.text.setLength(buf.roundStart); buf.dirty = true }
@@ -468,7 +469,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 messages = messages.map {
                     if (it.id == aid) it.copy(status = status, error = com.mazharansari.axion.security.SecretScanner.scrub(error), notice = "", thinkingMs = System.currentTimeMillis() - started,
                         firstWordMs = if (firstAt > 0) firstAt - tapped else 0, prepMs = if (requestAt > 0) requestAt - tapped else 0,
-                        steps = it.steps.map { st -> if (st.status == StepStatus.RUNNING) st.copy(status = StepStatus.ERROR, endedAt = System.currentTimeMillis()) else st })
+                        steps = it.steps.map { st -> if (st.status == StepStatus.RUNNING) st.copy(status = StepStatus.ERROR, endedAt = System.currentTimeMillis()) else st },
+                        plan = it.plan.map { ps -> if (ps.status == PlanStatus.RUNNING) ps.copy(status = PlanStatus.FAILED, note = ps.note.ifBlank { "stopped" }) else ps })   // axion-p2
                     else it
                 }
                 running = false
@@ -522,6 +524,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private class StreamBuffer {
         val text = StringBuilder(); val reasoning = StringBuilder(); val steps = ArrayList<Step>(); val artifacts = ArrayList<Artifact>()
+        @Volatile var plan: List<PlanStep> = emptyList()   // axion-p2
         var model = ""; var notice = ""; var dirty = false; var roundStart = 0
         @Volatile var closed = false
     }
@@ -534,7 +537,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         val (s0, notice) = snap
         messages = messages.map {
-            if (it.id == id) it.copy(text = s0.first, reasoning = s0.second, steps = s0.third.first, artifacts = s0.third.second, model = s0.third.third, notice = notice) else it
+            if (it.id == id) it.copy(text = s0.first, reasoning = s0.second, steps = s0.third.first, artifacts = s0.third.second, model = s0.third.third, notice = notice, plan = b.plan) else it
         }
         persist()
     }

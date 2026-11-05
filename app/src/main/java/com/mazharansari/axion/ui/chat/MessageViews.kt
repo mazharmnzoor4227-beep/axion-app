@@ -138,6 +138,7 @@ fun AssistantMessage(
     val streaming = m.status == MsgStatus.STREAMING
     // v0.3.1: Grok's reply column is 12 dp from each screen edge (measured), not 16.
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        if (m.plan.isNotEmpty()) { PlanCard(m.plan); Spacer(Modifier.height(10.dp)) }   // axion-p2
         if (m.steps.isNotEmpty() || m.reasoning.isNotBlank() || streaming) ThoughtsHeader(m, onOpenThoughts)
         if (streaming && m.notice.isNotBlank()) Text(m.notice, style = Type.small, color = p.text2, maxLines = 1, modifier = Modifier.padding(start = 30.dp, top = 2.dp))
         val runs = remember(m.steps) { runsOf(m.steps) }
