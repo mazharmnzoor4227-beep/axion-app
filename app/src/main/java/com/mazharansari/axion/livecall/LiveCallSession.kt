@@ -201,7 +201,18 @@ class LiveCallSession(
             LiveCallProtocol.endpointFor(credential.secret, alpha = LiveCallProtocol.isAffective(models[modelIndex])),
             object : LiveTransport.Listener {
                 override fun onOpen() = post(myAttempt, created) { handleOpen(resume) }
-                override fun onMessage(text: String) = post(myAttempt, created) { handleMessage(text) }
+                override fun onMessage(text: String) {
+                    // A cancellation takes effect the moment it arrives, not when the event queue
+                    // reaches it: a tool finishing in the same instant must never answer a call
+                    // the server already cancelled (the user barged in). The queued handleMessage
+                    // adds the same ids again — a set add, so it stays idempotent.
+                    if (text.contains("toolCallCancellation")) {
+                        for (event in LiveCallProtocol.parseServerMessage(text)) {
+                            if (event is LiveServerEvent.ToolCallCancelled) cancelledCallIds += event.ids
+                        }
+                    }
+                    post(myAttempt, created) { handleMessage(text) }
+                }
                 override fun onClosed(code: Int, reason: String) =
                     post(myAttempt, created) { handleClosed(code, reason) }
                 override fun onFailure(error: String) = post(myAttempt, created) { handleFailure(error) }
