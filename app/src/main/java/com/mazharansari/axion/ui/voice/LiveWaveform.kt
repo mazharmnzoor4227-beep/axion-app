@@ -63,6 +63,10 @@ fun LiveWaveform(
     var frameTick by remember { mutableLongStateOf(0L) }
     val currentLevel by rememberUpdatedState(level)
 
+    if (com.mazharansari.axion.ui.AnimationGate.inTestRuntime) {
+        Canvas(modifier) { }
+        return
+    }
     LaunchedEffect(Unit) {
         var previous = 0L
         while (true) {
