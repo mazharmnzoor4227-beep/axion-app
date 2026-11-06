@@ -428,7 +428,8 @@ private fun ProjectMenuSheet(vm: ChatViewModel, project: Project, onDismiss: () 
         SheetRow(Gk.folder, "Files", onClick = onFiles)
         if (project.kind != "android") SheetRow(Gk.rocket, "Publish", project.deploy?.url?.removePrefix("https://") ?: "Netlify · Vercel · Cloudflare · GitHub Pages", onClick = onPublish)
         run { val on = vm.g.settings.state.value.reviewBeforeApply   // axion-p1.2
-            SheetRow(Gk.eye, "Review changes before applying", if (on) "On: you approve every AI change first" else "Off: the AI edits your files directly", onClick = { vm.g.settings.update { it.copy(reviewBeforeApply = !on) }; onDismiss() }) }
+            SheetRow(Gk.eye, "Review changes before applying", if (on) "On: you approve every AI change first" else "Off: the AI edits your files directly", onClick = { vm.g.settings.update { it.copy(reviewBeforeApply = !on) }; onDismiss() })
+            SheetRow(Gk.eye, "Allow un-reviewed changes in very large projects", if (vm.g.settings.state.value.allowLargeUngated) "On: projects too large to hold for review are edited directly" else "Off: very large projects stop and ask first", onClick = { vm.g.settings.update { it.copy(allowLargeUngated = !it.allowLargeUngated) }; onDismiss() }) }
         if (vm.undoAvailable) SheetRow(Gk.history, "Undo last Build turn", "Put every file back the way it was", onClick = { vm.undoLastBuild(); onDismiss() })
         SheetRow(Gk.newChat, "New chat in this project", "Same files, fresh conversation", onClick = { vm.newChat(com.mazharansari.axion.ui.Section.BUILD); onDismiss() })
         SheetRow(Gk.trash, "Delete project", "Removes its folder and files", color = BRed, onClick = { confirmDelete = true })

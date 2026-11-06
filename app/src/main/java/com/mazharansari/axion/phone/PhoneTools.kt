@@ -13,7 +13,7 @@ object PhoneTools {
         "Act with phone_tap(id) / phone_type(id, text, submit) / phone_scroll / phone_back / phone_home. Element numbers change after every action. " +
         "To search in a browser: open the browser, phone_screen, tap the address/search bar, phone_type the query with submit=true, phone_screen to confirm, then summarise what you see. " +
         "NEVER operate banking, payment, wallet or password apps and never read or type passwords, PINs, OTPs or card numbers — if blocked, tell the user to do that step themselves. " +
-        "Before anything irreversible (sending a message, deleting, buying, posting) ask the user in chat first. If a tool says Stopped, stop and report where you got to. Keep going until the task is done, then summarise."
+        "Anything irreversible (sending a message, deleting, buying, posting) pauses on its own: the user personally presses CONFIRM on the control strip, or it does not happen — you cannot confirm it, and if the user does not confirm, do not look for another way; report that it was not done. If a tool says Stopped, stop and report where you got to. Keep going until the task is done, then summarise."
 
     fun all(actions: () -> PhoneActions = { PhoneController.actions }): List<Tool> = listOf(
         object : PhoneTool("phone_screen", "Read the current phone screen as numbered elements (app name, buttons, fields, text). Call before every tap or type.", schema { }) {
@@ -24,10 +24,10 @@ object PhoneTools {
             override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Opening app", args.s("name").orEmpty())
             override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().openApp(args.s("name").orEmpty())
         },
-        object : PhoneTool("phone_tap", "Tap element [id] from the latest phone_screen. Buttons like Send/Delete/Pay need confirmed=true, which you may set ONLY after the user said yes in chat.",
-            schema { int("id", "Element number", required = true); bool("confirmed", "true only after the user confirmed this irreversible action") }) {
+        object : PhoneTool("phone_tap", "Tap element [id] from the latest phone_screen. Irreversible buttons (Send/Delete/Pay/Post…) pause and show the user a CONFIRM button on the control strip; the tap completes only if the user presses it. You cannot confirm it yourself.",
+            schema { int("id", "Element number", required = true) }) {
             override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Tapping", "#" + (args.i("id") ?: 0))
-            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().tap(args.i("id") ?: -1, args.b("confirmed") == true)
+            override suspend fun run(args: JsonObject, ctx: ToolContext) = actions().tap(args.i("id") ?: -1)
         },
         object : PhoneTool("phone_type", "Type text into text field [id] (replaces its content). submit=true presses Enter/Search afterwards. Never for passwords/PINs.",
             schema { int("id", "Element number of a text field", required = true); str("text", "Text to type"); bool("submit", "Press Enter / Search after typing") }) {

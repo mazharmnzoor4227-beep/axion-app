@@ -71,8 +71,9 @@ class Phase2AcceptanceTest {
         // 1. a plan came first: the very first request offered ONLY plan_set
         assertEquals(listOf("plan_set"), seen[0].tools.map { it.name })
         assertTrue(rec.plans.first().size == 3)
-        // 2. every plan step ends up done
-        assertTrue(rec.plans.last().all { it.status == PlanStatus.DONE })
+        // 2. plan steps end honestly (v0.6.1): the step the model reported done is DONE; steps it never reported are SKIPPED, not silently "done"
+        assertEquals(PlanStatus.DONE, rec.plans.last()[0].status)
+        assertTrue(rec.plans.last().drop(1).all { it.status == PlanStatus.SKIPPED })
         // 3. the failing tool was retried exactly once, then the model was told to try another way, and the task still finished
         assertEquals(2, flaky.calls); assertEquals(1, backup.calls)
         assertTrue(rec.steps.any { it.title == "Retrying…" })

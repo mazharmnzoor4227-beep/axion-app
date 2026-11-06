@@ -20,8 +20,8 @@ android {
         applicationId = "com.mazharansari.axion"
         minSdk = 26
         targetSdk = 28   // v0.4: PRoot must exec Ubuntu binaries from app storage (W^X applies from 29), same as Kodex
-        versionCode = 12
-        versionName = "0.6.0"
+        versionCode = 13
+        versionName = "0.6.1"
         vectorDrawables { useSupportLibrary = true }
         resourceConfigurations += listOf("en")   // v0.5.3: all UI text is English; drops library translations (smaller APK)
         ndk { abiFilters += "arm64-v8a" }

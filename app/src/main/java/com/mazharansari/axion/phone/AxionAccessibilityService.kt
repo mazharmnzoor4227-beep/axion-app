@@ -41,7 +41,7 @@ class AxionAccessibilityService : AccessibilityService() {
         if (!PhoneController.active) return
         if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = e.packageName?.toString()
-            if (pkg != null && pkg != packageName && PhoneSafety.isDeniedPackage(pkg)) {
+            if (pkg != null && pkg != packageName && (PhoneSafety.isDeniedPackage(pkg) || PhoneSafety.isDeniedLabel(labelOf(pkg)))) {
                 performGlobalAction(GLOBAL_ACTION_HOME)
                 PhoneController.gate.log("✋ A banking / payment app opened — Home")
                 PhoneController.stop("A banking, payment or wallet app came to the front. Axion never operates those, so it stopped")
@@ -64,8 +64,9 @@ class AxionAccessibilityService : AccessibilityService() {
                 val interesting = text.isNotBlank() || desc.isNotBlank() || n.isClickable || n.isEditable || n.isScrollable
                 if (interesting) {
                     val id = out.size + 1; nodes[id] = n
+                    val r = Rect(); n.getBoundsInScreen(r)
                     out += PhoneSafety.Node(id, text, desc, n.viewIdResourceName.orEmpty(), n.isClickable, n.isEditable, n.isPassword, n.isScrollable,
-                        if (n.isCheckable) n.isChecked else null, n.className?.toString().orEmpty())
+                        if (n.isCheckable) n.isChecked else null, n.className?.toString().orEmpty(), r.left, r.top, r.right, r.bottom)
                 }
             }
             for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)

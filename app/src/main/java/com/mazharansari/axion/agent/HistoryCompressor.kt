@@ -22,7 +22,8 @@ object HistoryCompressor {
 
     private val decision = Regex(
         "\\b(use|using|keep|call (it|the app|this)|name (it|the app|this)|named|colou?r|theme|font|language|always|never|don'?t|do not|must|should be|make (it|the)|prefer|only|without|instead|" +
-        "rakho|rakhna|rakh do|use karo|istemal|naam|rang|hamesha|kabhi nahi|mat |nahi chahiye|chahiye|sirf|bina|zaroor|lazmi)\\b|[=:]\\s*#?[0-9a-f]{3,8}\\b",
+        "rakho|rakhna|rakh do|use karo|istemal|naam|rang|hamesha|kabhi nahi|mat |nahi chahiye|chahiye|sirf|bina|zaroor|lazmi|" +
+        "decided|decision|final hai|final kar|pakka|tay hai|tay kar|faisla|mera faisla|pasand|confirm kar|note kar|yaad rakho|hamesha ke liye|bilkul nahi|kabhi bhi nahi)\\b|[=:]\\s*#?[0-9a-f]{3,8}\\b",
         RegexOption.IGNORE_CASE)
 
     fun compress(history: List<ChatItem>, budgetTokens: Int = 5000, keepRecent: Int = 8, clipOld: Int = 1800): Result {
@@ -55,7 +56,7 @@ object HistoryCompressor {
         first?.let { sb.append("• First request: ").append(gist(it.text, 300)).append('\n') }
         val decisions = LinkedHashSet<String>()
         (listOfNotNull(first) + older).filterIsInstance<UserItem>().forEach { u -> decisions += decisionsIn(u.text) }
-        val keep = decisions.toList().takeLast(14)
+        val keep = decisions.toList().takeLast(20)   // v0.6.1: a little more room before the oldest decisions fall out
         if (keep.isNotEmpty()) { sb.append("• Decisions & preferences from the user:\n"); keep.forEach { sb.append("   - ").append(gist(it, 220)).append('\n') } }
         val turns = ArrayList<String>(); var pendingAsk: String? = null
         for (m in older) when (m) {

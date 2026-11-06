@@ -47,4 +47,10 @@ class HistoryCompressionTest {
         assertTrue(res.take(5).all { it.content.length < 500 && it.content.contains("shortened") }); assertTrue(res.takeLast(3).all { it.content.length > 5000 })
         assertSame(items, HistoryCompressor.compressRun(items.take(3), 6000).let { items })
     }
+    @Test fun newDecisionPhrasingsAreRecognised() {
+        // v0.6.1: decisions phrased the way the user actually talks must survive compression too
+        assertTrue(HistoryCompressor.decisionsIn("We decided to launch it on Friday only.").isNotEmpty())
+        assertTrue(HistoryCompressor.decisionsIn("Ye pakka final hai, is ko change mat karna kabhi.").isNotEmpty())
+        assertTrue(HistoryCompressor.decisionsIn("Mera faisla hai ke theme dark hi rahega.").isNotEmpty())
+    }
 }

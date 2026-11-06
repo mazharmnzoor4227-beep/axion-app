@@ -514,7 +514,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         var gated = false
         if (g.settings.state.value.reviewBeforeApply) {
             gated = try { withContext(Dispatchers.IO) { com.mazharansari.axion.build.ChangeGate.backup(folder, dir) }; true }
-            catch (e: com.mazharansari.axion.build.ChangeGate.TooLargeException) { sink.reasoning("This project is too big to hold changes for review (${e.message}); changes apply directly.\n"); false }
+            catch (e: com.mazharansari.axion.build.ChangeGate.TooLargeException) {
+                // v0.6.1: never slip into un-reviewed changes quietly — the user must have switched this on for large projects.
+                if (!g.settings.state.value.allowLargeUngated) throw NoModelException("This project is too large to hold changes for review (${e.message}), and un-reviewed changes are off. Either reduce the project size, or open the project menu and switch on \"Allow un-reviewed changes in very large projects\" — then ask again.")
+                sink.reasoning("This project is too big to hold changes for review (${e.message}); you allowed un-reviewed changes for large projects, so changes apply directly.\n"); false
+            }
         }
         val rn = reviewNote.also { reviewNote = null }
         val out = try { loop.run(p, (rn?.let { it + "\n\n" } ?: "") + u.text + note, fresh = p.agyConversation == null) }

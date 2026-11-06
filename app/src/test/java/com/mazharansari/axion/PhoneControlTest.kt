@@ -1,6 +1,8 @@
 package com.mazharansari.axion.phone
 
 import com.mazharansari.axion.phone.PhoneSafety.Node
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -75,21 +77,21 @@ class PhoneControlTest {
         val f = Fake(mutableListOf(chromeHome(), chromeResults())); val g = PhoneGate(); val a = act(f, g); g.begin()
         assertFalse(a.openApp("browser").isError)
         val s1 = a.screen(); assertFalse(s1.isError); assertTrue(s1.forModel.contains("[1] text field \"Search or type URL\""))
-        assertFalse(a.tap(1, false).isError); assertFalse(a.type(1, "load shedding schedule", true).isError)
+        assertFalse(a.tap(1).isError); assertFalse(a.type(1, "load shedding schedule", true).isError)
         val s2 = a.screen(); assertTrue(s2.forModel.contains("Load shedding schedule Karachi"))
         assertEquals(listOf("launch com.android.chrome", "click 1", "type 1 'load shedding schedule' submit=true"), f.log)
         val shown = g.all().joinToString("\n"); assertTrue(shown, shown.contains("Opening Chrome") && shown.contains("Typing") && shown.contains("Reading Chrome"))   // the live overlay log
     }
     @Test fun stopHaltsTheVeryNextActionAtOnce() = runBlocking {
         val f = Fake(mutableListOf(chromeHome())); val g = PhoneGate(); val a = act(f, g); g.begin()
-        assertFalse(a.tap(2, false).isError)
+        assertFalse(a.tap(2).isError)
         g.stop("You pressed STOP")
-        for (r in listOf(a.screen(), a.tap(2, false), a.type(1, "x", false), a.scroll("down"), a.back(), a.home(), a.openApp("Chrome"), a.waitSec(1))) { assertTrue(r.isError); assertTrue(r.forModel, r.forModel.startsWith("Stopped")) }
+        for (r in listOf(a.screen(), a.tap(2), a.type(1, "x", false), a.scroll("down"), a.back(), a.home(), a.openApp("Chrome"), a.waitSec(1))) { assertTrue(r.isError); assertTrue(r.forModel, r.forModel.startsWith("Stopped")) }
         assertEquals(listOf("click 2"), f.log)                    // nothing touched the phone after STOP
     }
     @Test fun nothingRunsWithoutAnActiveRun() = runBlocking {
         val f = Fake(mutableListOf(chromeHome())); val a = act(f, PhoneGate())
-        assertTrue(a.tap(1, false).isError); assertTrue(a.openApp("Chrome").isError); assertTrue(f.log.isEmpty())
+        assertTrue(a.tap(1).isError); assertTrue(a.openApp("Chrome").isError); assertTrue(f.log.isEmpty())
     }
     @Test fun serviceOffExplainsHowToEnableIt() = runBlocking {
         val f = Fake(mutableListOf(chromeHome())).also { it.connected = false }; val g = PhoneGate(); g.begin()
@@ -103,7 +105,7 @@ class PhoneControlTest {
     @Test fun ifABankingAppIsInFrontItGoesHomeAndRefuses() = runBlocking {
         val f = Fake(mutableListOf(PhoneScreen("com.techlogix.mobilink", "JazzCash", listOf(Node(1, text = "Send money", clickable = true))))); val g = PhoneGate(); g.begin(); val a = act(f, g)
         val r = a.screen(); assertTrue(r.isError); assertTrue(r.forModel.contains("home screen")); assertFalse(r.forModel.contains("Send money"))
-        assertEquals(listOf("home"), f.log); assertTrue(a.tap(1, true).isError); assertFalse(f.log.contains("click 1"))
+        assertEquals(listOf("home"), f.log); assertTrue(a.tap(1).isError); assertFalse(f.log.contains("click 1"))
     }
     @Test fun passwordFieldsAreNeverReadOrTyped() = runBlocking {
         val login = PhoneScreen("com.some.app", "Some App", listOf(Node(1, text = "Email", editable = true), Node(2, text = "Password", editable = true, password = true), Node(3, text = "Log in", clickable = true)))
@@ -111,20 +113,58 @@ class PhoneControlTest {
         val s = a.screen(); assertTrue(s.isError); assertFalse(s.forModel.contains("Email")); assertTrue(a.type(2, "hunter2", false).isError); assertTrue(a.type(1, "me@x.com", false).isError)
         assertTrue(f.log.isEmpty())
     }
-    @Test fun irreversibleTapAsksFirstThenWorksWhenConfirmed() = runBlocking {
-        val f = Fake(mutableListOf(PhoneScreen("com.whatsapp", "WhatsApp", listOf(Node(1, text = "Send", clickable = true), Node(2, text = "Attach", clickable = true))))); val g = PhoneGate(); g.begin(); val a = act(f, g)
-        val r = a.tap(1, false); assertTrue(r.isError); assertEquals(126, r.exitCode); assertTrue(r.forModel.contains("confirmed=true")); assertTrue(f.log.isEmpty())
-        assertFalse(a.tap(1, true).isError); assertEquals(listOf("click 1"), f.log); assertFalse(a.tap(2, false).isError)
+    @Test fun irreversibleTapWaitsForTheUsersOwnConfirmPress() = runBlocking {
+        val screen = PhoneScreen("com.whatsapp", "WhatsApp", listOf(Node(1, text = "Send", clickable = true), Node(2, text = "Attach", clickable = true)))
+        // (a) v0.6.1: there is no confirmed=true any more — with nobody pressing CONFIRM the tap refuses and nothing is clicked
+        val f1 = Fake(mutableListOf(screen)); val g1 = PhoneGate(confirmTimeoutMs = 300); g1.begin(); val a1 = act(f1, g1)
+        val r = a1.tap(1); assertTrue(r.isError); assertEquals(126, r.exitCode); assertTrue(r.forModel.contains("CONFIRM")); assertFalse(r.forModel.contains("confirmed=true")); assertTrue(f1.log.isEmpty())
+        // (b) the tap parks until the user personally presses CONFIRM — then exactly that one tap goes through
+        val f2 = Fake(mutableListOf(screen)); val g2 = PhoneGate(confirmTimeoutMs = 5000); g2.begin(); val a2 = act(f2, g2)
+        val waiting = async { a2.tap(1) }
+        delay(200); assertTrue(g2.pendingConfirm != null); assertTrue(f2.log.isEmpty())          // parked: nothing tapped yet
+        g2.confirmPending()
+        assertFalse(waiting.await().isError); assertEquals(listOf("click 1"), f2.log)
+        assertFalse(a2.tap(2).isError)                                                            // ordinary buttons never wait
+        // (c) STOP while a confirmation is waiting answers "no" at once
+        val f3 = Fake(mutableListOf(screen)); val g3 = PhoneGate(confirmTimeoutMs = 5000); g3.begin(); val a3 = act(f3, g3)
+        val waiting3 = async { a3.tap(1) }; delay(200); g3.stop("You pressed STOP")
+        assertTrue(waiting3.await().isError); assertTrue(f3.log.isEmpty())
+    }
+    @Test fun otpPhrasingVariantsAreCaught() {
+        assertNotNull(PhoneSafety.sensitiveScreen("com.some.app", listOf(Node(1, text = "Enter the 6-digit code we sent you"))))
+        assertNotNull(PhoneSafety.sensitiveScreen("com.some.app", listOf(Node(1, text = "OTP", editable = true))))
+        assertNotNull(PhoneSafety.sensitiveScreen("com.some.app", listOf(Node(1, text = "Verification code", editable = true))))
+        assertNotNull(PhoneSafety.sensitiveScreen("com.some.app", listOf(Node(1, text = "Verify your phone number"), Node(2, text = "Code", editable = true))))
+        assertNotNull(PhoneSafety.sensitiveScreen("com.some.app", listOf(Node(1, text = "Apna 4-digit code daalo"))))
+    }
+    @Test fun plainBankDomainsAreBlockedInTheBrowser() {
+        assertNotNull(PhoneSafety.sensitiveScreen("com.android.chrome", listOf(Node(1, text = "https://www.hbl.com/login", viewId = "com.android.chrome:id/url_bar"))))
+        assertNotNull(PhoneSafety.sensitiveScreen("com.android.chrome", listOf(Node(1, text = "easypaisa.com.pk/account", viewId = "com.android.chrome:id/url_bar"))))
+        assertNull(PhoneSafety.sensitiveScreen("com.android.chrome", listOf(Node(1, text = "https://www.google.com/search?q=hbl+timings", viewId = "com.android.chrome:id/url_bar"))))
+    }
+    @Test fun unlabelledIconBesideAFieldCountsAsSend() {
+        val field = Node(1, editable = true, l = 100, t = 900, r = 800, b = 1000, className = "EditText")
+        val icon = Node(2, clickable = true, l = 830, t = 910, r = 950, b = 990, className = "ImageButton")
+        val farIcon = Node(3, clickable = true, l = 830, t = 100, r = 950, b = 200, className = "ImageButton")
+        val nodes = listOf(field, icon, farIcon)
+        assertTrue(PhoneSafety.looksLikeSend(icon, nodes)); assertFalse(PhoneSafety.looksLikeSend(farIcon, nodes))
+        assertFalse(PhoneSafety.looksLikeSend(Node(4, clickable = true), nodes))   // unknown bounds never match
+    }
+    @Test fun backDoesNotActBlindOnASensitiveScreen() = runBlocking {
+        val login = PhoneScreen("com.some.app", "Some App", listOf(Node(1, text = "Password", editable = true, password = true)))
+        val f = Fake(mutableListOf(login)); val g = PhoneGate(); g.begin(); val a = act(f, g)
+        assertTrue(a.back().isError); assertTrue(f.log.isEmpty())
+        assertFalse(a.home().isError); assertEquals(listOf("home"), f.log)   // Home is the escape hatch — always allowed
     }
     @Test fun badIdsAndNonFieldsGiveHelpfulErrors() = runBlocking {
         val f = Fake(mutableListOf(chromeHome())); val g = PhoneGate(); g.begin(); val a = act(f, g)
-        assertTrue(a.tap(99, false).forModel.contains("phone_screen")); assertTrue(a.type(2, "x", false).forModel.contains("not a text field")); assertTrue(a.scroll("sideways").isError)
+        assertTrue(a.tap(99).forModel.contains("phone_screen")); assertTrue(a.type(2, "x", false).forModel.contains("not a text field")); assertTrue(a.scroll("sideways").isError)
         assertTrue(a.openApp("Nonexistent").forModel.contains("No installed app"))
     }
     @Test fun actionLimitStopsARunawayLoop() = runBlocking {
         val f = Fake(mutableListOf(chromeHome())); val g = PhoneGate(maxActions = 5); g.begin(); val a = act(f, g)
-        repeat(5) { assertFalse(a.tap(2, false).isError) }
-        val r = a.tap(2, false); assertTrue(r.forModel, r.forModel.contains("action limit")); assertEquals(5, f.log.size)
+        repeat(5) { assertFalse(a.tap(2).isError) }
+        val r = a.tap(2); assertTrue(r.forModel, r.forModel.contains("action limit")); assertEquals(5, f.log.size)
     }
     @Test fun theToolsRefuseWhenNoRunToken() = runBlocking {
         val tools = PhoneTools.all { PhoneActions(Fake(mutableListOf(chromeHome())), PhoneGate(), 0) }

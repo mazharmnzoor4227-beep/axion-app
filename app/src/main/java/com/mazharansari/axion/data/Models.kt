@@ -31,7 +31,7 @@ data class Step(
 
 /** v0.6 (axion-p2) the agent's visible plan: numbered steps with a live status. */
 @Serializable
-enum class PlanStatus { PENDING, RUNNING, DONE, FAILED }
+enum class PlanStatus { PENDING, RUNNING, DONE, FAILED, SKIPPED }   // SKIPPED (v0.6.1): planned but never actually run — the card must not claim it as done
 
 @Serializable
 data class PlanStep(val text: String, val status: PlanStatus = PlanStatus.PENDING, val note: String = "")

@@ -21,8 +21,8 @@ interface PhoneBackend {
 
 /**
  * The phone tools' brain: every action goes through the same checks, in this order — run token (STOP / time / action limit), service connected,
- * foreground app not banking/payment/wallet, screen not sensitive, irreversible buttons confirmed — then it acts, logs the step for the
- * live overlay, and lets the screen settle. Refusals carry exit code [REFUSED] so the fault policy does not blindly retry them.
+ * foreground app not banking/payment/wallet, screen not sensitive, irreversible buttons confirmed BY THE USER on the control strip — then it acts,
+ * logs the step for the live overlay, and lets the screen settle. Refusals carry exit code [REFUSED] so the fault policy does not blindly retry them.
  */
 class PhoneActions(private val backend: PhoneBackend, private val gate: PhoneGate, private val settleMs: Long = 700) {
     companion object { const val REFUSED = 126; const val MAX_NODES = 70 }
@@ -79,21 +79,27 @@ class PhoneActions(private val backend: PhoneBackend, private val gate: PhoneGat
         return ToolOutput("Opened ${app.label}. Call phone_screen to see it.")
     }
 
-    suspend fun tap(id: Int, confirmed: Boolean): ToolOutput {
+    suspend fun tap(id: Int): ToolOutput {
         precheck()?.let { return it }
         val (s, bad) = look(); if (bad != null) return bad
         val n = s!!.nodes.firstOrNull { it.id == id } ?: return fail("No element [$id] on this screen. Call phone_screen for fresh numbers.")
-        if (!confirmed && PhoneSafety.looksIrreversible(n.label)) {
-            gate.log("⏸ Waiting for your OK: \"${n.label.take(40)}\"")
-            return refuse("\"${n.label}\" looks irreversible (send / delete / pay / post …). Ask the user in chat to confirm, and only after they say yes call phone_tap again with confirmed=true.")
-        }
         if (n.password) return refuse("Refused: that is a password field.")
+        // v0.6.1: irreversible taps (and unlabelled send-like icons) park until the USER presses CONFIRM on the control strip.
+        // The model cannot confirm — there is deliberately no argument for it. One wait arms exactly this one tap.
+        if (PhoneSafety.looksIrreversible(n.label) || PhoneSafety.looksLikeSend(n, s.nodes)) {
+            val what = n.label.ifBlank { "the send button next to the text field" }
+            val ok = gate.awaitUserConfirm("${s.pkg}|${n.label.trim().lowercase()}", what)
+            if (!ok) return refuse("\"$what\" was NOT tapped: the user did not press CONFIRM on the control strip (it timed out, or STOP was pressed). Do NOT try another way to perform this action. Tell the user it was not done and ask them what they want.")
+            gate.check()?.let { return refuse(it) }
+            val fresh = backend.snapshot()
+            if (fresh == null || fresh.pkg != s.pkg || fresh.nodes.none { it.id == id }) return fail("The screen changed while waiting for confirmation. Call phone_screen for fresh numbers, then tap again.")
+        }
         gate.countAction(); gate.log("👆 Tap ${n.label.ifBlank { "[$id]" }.take(40)}")
         if (!backend.click(id)) return fail("Tapping [$id] did not work (element gone or not tappable). Call phone_screen again.")
         delay(settleMs); return ToolOutput("Tapped [$id] ${n.label.take(40)}. Call phone_screen to see the result.")
     }
 
-    suspend fun type(id: Int, text: String, submit: Boolean, confirmed: Boolean = false): ToolOutput {
+    suspend fun type(id: Int, text: String, submit: Boolean): ToolOutput {
         precheck()?.let { return it }
         val (s, bad) = look(); if (bad != null) return bad
         val n = s!!.nodes.firstOrNull { it.id == id } ?: return fail("No element [$id] on this screen. Call phone_screen for fresh numbers.")
@@ -114,7 +120,15 @@ class PhoneActions(private val backend: PhoneBackend, private val gate: PhoneGat
         delay(settleMs); return ToolOutput("Scrolled $d. Call phone_screen to read the new content.")
     }
 
-    suspend fun back(): ToolOutput { precheck()?.let { return it }; gate.countAction(); gate.log("◀ Back"); backend.back(); delay(settleMs); return ToolOutput("Went back.") }
-    suspend fun home(): ToolOutput { precheck()?.let { return it }; gate.countAction(); gate.log("⌂ Home"); backend.home(); delay(settleMs); return ToolOutput("Went to the home screen.") }
+    suspend fun back(): ToolOutput {
+        precheck()?.let { return it }
+        val (_, bad) = look(); if (bad != null) return bad   // v0.6.1: never act blind inside a sensitive screen, not even Back
+        gate.countAction(); gate.log("◀ Back"); backend.back(); delay(settleMs); return ToolOutput("Went back.")
+    }
+    suspend fun home(): ToolOutput {
+        precheck()?.let { return it }
+        try { look() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { }   // Home is the escape hatch: look() itself goes Home on a denied app; its refusal is fine here — we are leaving anyway
+        gate.countAction(); gate.log("⌂ Home"); backend.home(); delay(settleMs); return ToolOutput("Went to the home screen.")
+    }
     suspend fun waitSec(sec: Int): ToolOutput { precheck()?.let { return it }; val s = sec.coerceIn(1, 10); gate.log("⏳ Waiting ${s}s"); delay(s * 1000L); return ToolOutput("Waited $s s.") }
 }

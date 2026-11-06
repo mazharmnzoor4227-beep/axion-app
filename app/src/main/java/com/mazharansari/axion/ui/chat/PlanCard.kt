@@ -26,10 +26,11 @@ fun PlanCard(steps: List<PlanStep>, modifier: Modifier = Modifier) {
     if (steps.isEmpty()) return
     val p = P; val shape = RoundedCornerShape(14.dp)
     val done = steps.count { it.status == PlanStatus.DONE }
+    val skipped = steps.count { it.status == PlanStatus.SKIPPED }
     Column(modifier.fillMaxWidth().clip(shape).background(p.card).border(1.dp, p.cardBorder, shape).padding(horizontal = 14.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Plan", style = Type.small.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = p.text, modifier = Modifier.weight(1f))
-            Text("$done / ${steps.size}", style = Type.small.copy(fontSize = 13.sp), color = p.text2)
+            Text("$done / ${steps.size}" + if (skipped > 0) " · $skipped skipped" else "", style = Type.small.copy(fontSize = 13.sp), color = p.text2)
         }
         Spacer(Modifier.height(8.dp))
         steps.forEachIndexed { i, s ->
@@ -39,12 +40,13 @@ fun PlanCard(steps: List<PlanStep>, modifier: Modifier = Modifier) {
                         PlanStatus.DONE -> GkIcon(Gk.check, "done", 16.dp, Color(0xFF3FB950))
                         PlanStatus.FAILED -> GkIcon(Gk.close, "failed", 15.dp, p.danger)
                         PlanStatus.RUNNING -> PulseDot()
+                        PlanStatus.SKIPPED -> GkIcon(Gk.close, "skipped", 13.dp, p.text3)
                         PlanStatus.PENDING -> Box(Modifier.size(9.dp).clip(CircleShape).border(1.5.dp, p.text3, CircleShape))
                     }
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("${i + 1}. ${s.text}", style = Type.body.copy(fontSize = 15.sp, lineHeight = 21.sp), color = when (s.status) { PlanStatus.PENDING -> p.text2; PlanStatus.FAILED -> p.danger; else -> p.text })
+                    Text("${i + 1}. ${s.text}", style = Type.body.copy(fontSize = 15.sp, lineHeight = 21.sp), color = when (s.status) { PlanStatus.PENDING, PlanStatus.SKIPPED -> p.text2; PlanStatus.FAILED -> p.danger; else -> p.text })
                     if (s.note.isNotBlank()) Text(s.note, style = Type.small.copy(fontSize = 12.5.sp), color = p.text2)
                 }
             }

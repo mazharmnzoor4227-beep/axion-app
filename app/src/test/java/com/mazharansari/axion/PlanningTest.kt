@@ -13,6 +13,9 @@ class PlanningTest {
         assertTrue(Planner.needsPlan("Build a website for my shop, then add a contact form and after that deploy it to netlify", Intent.ACTION))
         assertTrue(Planner.needsPlan("pehle is file ko parho phir summary banao aur phir PDF bhi bana do please", Intent.ACTION))
         assertTrue(Planner.needsPlan("1. read the csv\n2. clean the data\n3. make a chart", Intent.ACTION))
+        // v0.6.1: short multi-step orders plan too; a single small ask still does not
+        assertTrue(Planner.needsPlan("logo banao aur home page par lagao", Intent.ACTION))
+        assertFalse(Planner.needsPlan("ek photo bhej do please abhi", Intent.ACTION))
     }
     @Test fun planSetAndUpdateStatuses() {
         val s = PlanState()
@@ -25,8 +28,12 @@ class PlanningTest {
         assertEquals("Write page", s.steps[1].text)
     }
     @Test fun finishResolvesEverything() {
+        // v0.6.1: only steps that actually ran may end DONE — a step that never ran ends SKIPPED, never silently "done"
         val s = PlanState(); s.set(listOf("a", "b", "c")); s.update(1, "done")
-        s.finish(ok = true); assertTrue(s.steps.all { it.status == PlanStatus.DONE })
+        s.finish(ok = true)
+        assertEquals(listOf(PlanStatus.DONE, PlanStatus.SKIPPED, PlanStatus.SKIPPED), s.steps.map { it.status })
+        val r = PlanState(); r.set(listOf("a", "b")); r.finish(ok = true)
+        assertEquals(PlanStatus.DONE, r.steps[0].status)   // the step that was running when the answer came counts as done
         val f = PlanState(); f.set(listOf("a", "b")); f.finish(ok = false, reason = "tool gave up")
         assertEquals(PlanStatus.FAILED, f.steps[0].status); assertEquals(PlanStatus.PENDING, f.steps[1].status)
     }

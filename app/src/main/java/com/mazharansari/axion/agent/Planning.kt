@@ -22,13 +22,14 @@ class PlanState {
         return "Plan set (${clean.size} steps). Work through it in order; call plan_update(index, status) as each step starts or finishes."
     }
 
-    /** index is 1-based. status: running | done | failed | pending. A step that starts running moves earlier running steps to done. */
+    /** index is 1-based. status: running | done | failed | pending | skipped. A step that starts running moves earlier running steps to done. */
     fun update(index: Int, status: String, note: String = ""): String {
         if (steps.isEmpty()) return "There is no plan yet."
         if (index !in 1..steps.size) return "Step $index does not exist (1-${steps.size})."
         val st = when (status.trim().lowercase()) { "done", "complete", "completed", "finished" -> PlanStatus.DONE; "failed", "fail", "error" -> PlanStatus.FAILED
             "running", "doing", "started", "in_progress", "in progress" -> PlanStatus.RUNNING; "pending", "todo" -> PlanStatus.PENDING
-            else -> return "Unknown status '$status' (use running, done, failed)." }
+            "skipped", "skip", "not needed", "not_needed" -> PlanStatus.SKIPPED
+            else -> return "Unknown status '$status' (use running, done, failed, skipped)." }
         steps = steps.mapIndexed { i, s ->
             when {
                 i == index - 1 -> s.copy(status = st, note = note.trim().take(160))
@@ -39,14 +40,17 @@ class PlanState {
         return "Step $index is now ${st.name.lowercase()}."
     }
 
-    /** The answer is out: nothing may stay "running"/"pending" — done, unless the run ended on a failure. */
+    /**
+     * The answer is out. The step that was actually running may count as done; a step that NEVER ran must not claim "done" —
+     * v0.6.1: it becomes SKIPPED on a successful run (an honest card), and stays pending on a failed one.
+     */
     fun finish(ok: Boolean, reason: String = "") {
         if (steps.isEmpty()) return
         steps = steps.map { s ->
             when (s.status) {
-                PlanStatus.DONE, PlanStatus.FAILED -> s
+                PlanStatus.DONE, PlanStatus.FAILED, PlanStatus.SKIPPED -> s
                 PlanStatus.RUNNING -> if (ok) s.copy(status = PlanStatus.DONE) else s.copy(status = PlanStatus.FAILED, note = reason.take(160))
-                PlanStatus.PENDING -> if (ok) s.copy(status = PlanStatus.DONE) else s
+                PlanStatus.PENDING -> if (ok) s.copy(status = PlanStatus.SKIPPED, note = "not run") else s
             }
         }
     }
@@ -59,13 +63,17 @@ object Planner {
     private val connectors = Regex("(\\bthen\\b|\\band then\\b|\\bafter that\\b|\\bphir\\b|\\bfir\\b|\\bus ke baad\\b|\\bpehle\\b|\\bfirst\\b|\\bfinally\\b|\\bphir se\\b|\\balso\\b|\\baur\\b|\\band\\b|\\+|;|\\n\\s*(\\d+[.)]|[-*])\\s)", RegexOption.IGNORE_CASE)
     private val bigThing = Regex("\\b(website|web ?app|app|project|landing page|dashboard|report|audit|pipeline|bot|game|store|portfolio|scraper|api|backend|frontend)\\b", RegexOption.IGNORE_CASE)
 
-    /** Cheap, model-free: only real multi-step ACTION requests get a plan (a greeting or a one-liner never does). */
+    private val actionVerbs = Regex("\\b(banao|bana do|bana|likho|likh|lagao|laga do|add|create|build|make|design|fix|update|change|remove|hatao|delete|bhejo|bhej|download|upload|setup|set up|install|convert|merge|split|rename|move|copy|generate|prepare|tayyar|shuru)\\b", RegexOption.IGNORE_CASE)
+
+    /** Cheap, model-free: only real multi-step ACTION requests get a plan (a greeting or a one-liner never does). v0.6.1: shorter multi-step orders count too. */
     fun needsPlan(text: String, intent: Intent): Boolean {
         if (intent != Intent.ACTION) return false
-        val t = text.trim(); if (t.length < 40) return false
+        val t = text.trim(); if (t.length < 24) return false
         val links = connectors.findAll(t).count()
         val lines = t.lines().count { it.isNotBlank() }
-        return links >= 2 || lines >= 3 || t.length >= 160 || (bigThing.containsMatchIn(t) && links >= 1)
+        val verbs = actionVerbs.findAll(t).count()
+        return links >= 2 || lines >= 3 || t.length >= 160 || (bigThing.containsMatchIn(t) && links >= 1) ||
+            (links >= 1 && verbs >= 2) || verbs >= 3 || (lines >= 2 && verbs >= 2)
     }
 
     const val INSTRUCTIONS = "PLANNING: this is a multi-step task. Your FIRST action must be one call to plan_set with 3-7 short steps (what you will do, in order). " +
@@ -75,7 +83,7 @@ object Planner {
     val planSetSpec = ToolSpec(PLAN_SET, "Show the user your plan before you start: 3-7 short steps in order.",
         schema { str("steps", "JSON array of short step strings, e.g. [\"Read the uploaded file\",\"Write the page\",\"Check the preview\"]") })
     val planUpdateSpec = ToolSpec(PLAN_UPDATE, "Update one plan step's status as you go.",
-        schema { int("index", "Step number, starting at 1", required = true); str("status", "running | done | failed"); str("note", "Short note (optional)", required = false) })
+        schema { int("index", "Step number, starting at 1", required = true); str("status", "running | done | failed | skipped"); str("note", "Short note (optional)", required = false) })
 
     /** Accepts a JSON array in `steps`, an array element, or a numbered / bulleted text list. */
     fun parseSteps(args: JsonObject): List<String> {

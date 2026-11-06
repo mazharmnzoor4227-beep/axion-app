@@ -16,7 +16,10 @@ object PhoneController {
     val serviceUp: StateFlow<Boolean> get() = _serviceUp
     val active get() = gate.isActive
 
-    init { gate.onChange = { overlay?.update(gate.recent(3)) } }
+    init { gate.onChange = { overlay?.update(gate.recent(3), gate.pendingConfirm?.label) } }
+
+    /** The CONFIRM button on the control strip — the user's own press for one waiting irreversible tap. */
+    fun confirmPending() = gate.confirmPending()
 
     fun attach(svc: AxionAccessibilityService, o: PhoneOverlay) { overlay = o; _serviceUp.value = true }
     fun detach() { overlay?.hide(); overlay = null; _serviceUp.value = false }

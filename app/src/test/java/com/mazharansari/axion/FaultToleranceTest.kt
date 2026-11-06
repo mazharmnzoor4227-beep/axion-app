@@ -63,4 +63,18 @@ class FaultToleranceTest {
         val p = FaultPolicy(maxToolCalls = 3, retryPauseMs = 1); repeat(3) { i -> p.execute("t", "{$i}", 1000) { ok("a") } }
         val o = p.execute("t", "{9}", 1000) { ok("b") }; assertEquals(Kind.BUDGET, o.kind); assertTrue(o.mustReport)
     }
+    @Test fun safetyRefusalsGetNoAlternativePressureAndNoFailureStreak() = runBlocking {
+        // v0.6.1: exit 126 (a safety refusal: banking block / password screen / the user did not CONFIRM) is final, not a fault
+        val p = FaultPolicy(retryPauseMs = 1); var n = 0
+        val o = p.execute("phone_tap", "{}", 1000) { n++; bad("Refused: the user did not press CONFIRM", 126) }
+        assertEquals(1, n)                                            // never retried
+        assertFalse(o.forModel.contains("DIFFERENT approach"))        // no "find a way around it" pressure
+        assertFalse(o.mustReport); assertEquals(0, p.consecutiveFailures); assertEquals(0, p.alternativesUsed)
+    }
+    @Test fun aTimedOutPhoneActionIsNotRetriedBlindly() = runBlocking {
+        // v0.6.1: a phone tap that times out may already have happened on the phone — the policy must not do it twice
+        var n = 0
+        val o = FaultPolicy(retryPauseMs = 1).execute("phone_tap", "{}", 150) { n++; delay(60_000); ok("never") }
+        assertEquals(Kind.TIMED_OUT, o.kind); assertEquals(1, n); assertEquals(1, o.attempts)
+    }
 }

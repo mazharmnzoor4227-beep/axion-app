@@ -141,7 +141,7 @@ class Agent(
                 val shown = if (failedKind) (if (outcome.mustReport) "Gave up: " else "Trying another way — ") + out.display.take(300) else out.display
                 sink.step(step.copy(
                     title = doneTitle, status = if (out.isError) StepStatus.ERROR else StepStatus.DONE,
-                    output = com.mazharansari.axion.security.SecretScanner.scrub(shown.clip(4000)), endedAt = System.currentTimeMillis(), exitCode = out.exitCode,   // axion-p1.4
+                    output = com.mazharansari.axion.security.SecretScanner.scrub(shown.clip(20000)), endedAt = System.currentTimeMillis(), exitCode = out.exitCode,   // axion-p1.4; v0.6.1: persisted step output cap 4k -> 20k
                 ))
                 if (!out.isError) out.artifact?.let(sink::artifact)
                 sink.usedTool(ToolCatalog.titleOf(call.name))   // axion-p3: Used tool: …
