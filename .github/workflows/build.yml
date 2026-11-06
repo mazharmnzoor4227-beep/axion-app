@@ -1,4 +1,4 @@
-name: Fixes Build (v0.6.1)
+name: Release Build (v0.6.1)
 on:
   push:
     branches: [axion-upgrade-fixes]
@@ -17,18 +17,15 @@ jobs:
           SDKM=$(ls $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager | sort | tail -1)
           yes | $SDKM --licenses > /dev/null 2>&1 || true
           $SDKM "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
-      - name: Assemble debug first, then unit tests (continue on failure)
+      - name: Assemble release (unsigned)
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
-          ./gradlew testDebugUnitTest --continue --no-daemon --stacktrace
-      - name: Upload reports + debug APK
+          ./gradlew assembleRelease --no-daemon --stacktrace
+      - name: Upload unsigned release APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fixes-build-output
+          name: release-apk
           path: |
-            app/build/reports/tests/
-            app/build/test-results/
-            app/build/outputs/apk/debug/*.apk
-          if-no-files-found: ignore
+            app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
