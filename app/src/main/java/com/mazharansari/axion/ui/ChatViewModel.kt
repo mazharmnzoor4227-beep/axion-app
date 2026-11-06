@@ -454,8 +454,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val pid = projectId
                 if (sec == Section.BUILD && pid != null) withContext(Dispatchers.Default) { runBuildTurn(pid, u, sink) }
                 else withContext(Dispatchers.Default) {
-                    // axion-p3 phone control: a run token exists only for this turn, only with the user's consent + the switch ON + the service enabled
-                    if (intent == com.mazharansari.axion.agent.Intent.ACTION && s.phoneConsent && com.mazharansari.axion.agent.ToolCatalog.isEnabled("phone_screen", s.toolSwitches) &&
+                    // axion-p3 phone control: a run token exists only for this turn, only with the user's consent + the switch ON + the service enabled.
+                    // v0.7.0: the ACTION label no longer gates this — the owner asks in plain words in any chat ("browser kholo, research karke batao")
+                    // and the classifier's label must not silently disable the phone. Consent + the switch + the service remain the real gates.
+                    if (s.phoneConsent && com.mazharansari.axion.agent.ToolCatalog.isEnabled("phone_screen", s.toolSwitches) &&
                         com.mazharansari.axion.phone.PhoneController.beginRun()) {
                         phoneStarted = true
                         com.mazharansari.axion.phone.PhoneController.onStopRequested = { viewModelScope.launch(Dispatchers.Main.immediate) { stop() } }
