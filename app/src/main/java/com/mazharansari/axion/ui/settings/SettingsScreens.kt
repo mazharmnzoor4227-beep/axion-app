@@ -406,7 +406,7 @@ private fun VoiceTile(title: String, tag: String, selected: Boolean, dim: Boolea
 fun Orb(size: Dp, level: Float = 0f, mode: OrbMode = OrbMode.Listening) {
     val p = P
     var elapsed by remember { mutableFloatStateOf(0f) }
-    if (mode != OrbMode.Frozen) {
+    if (mode != OrbMode.Frozen && !com.mazharansari.axion.ui.AnimationGate.inTestRuntime) {
         LaunchedEffect(mode) {
             val start = withFrameNanos { it }
             while (true) withFrameNanos { elapsed = (it - start) / 1_000_000_000f }
