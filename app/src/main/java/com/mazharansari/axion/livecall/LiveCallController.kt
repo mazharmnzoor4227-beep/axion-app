@@ -148,6 +148,9 @@ class LiveCallController(
             audioManager.setStreamVolume(s, LiveLoudness.startVolume(previousCallVolume, audioManager.getStreamMaxVolume(s)), 0)
         }
         player.start()
+        val bridge = toolBridge
+        val toolExecutor: (suspend (String, org.json.JSONObject) -> org.json.JSONObject)? =
+            bridge?.let { b -> { name: String, args: org.json.JSONObject -> b.execute(name, args) } }
         val created = LiveCallSession(
             transportFactory = { OkHttpLiveTransport() },
             credentials = credentials,
@@ -159,7 +162,7 @@ class LiveCallController(
             ),
             listener = sessionListener,
             restingKeyIds = restingKeyIds,
-            toolExecutor = toolBridge?.let { bridge -> { name: String, args: org.json.JSONObject -> bridge.execute(name, args) } },
+            toolExecutor = toolExecutor,
             onEndCall = { stop() },
         )
         session = created
