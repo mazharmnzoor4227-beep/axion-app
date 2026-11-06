@@ -1,11 +1,15 @@
 package com.mazharansari.axion.livecall
 
+import java.util.Collections
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /**
  * The transport the Live session talks over. The production
@@ -33,6 +37,8 @@ data class LiveCallConfig(
     val voiceName: String = LiveCallProtocol.DEFAULT_VOICE,
     val model: String = LiveCallProtocol.MODEL,
     val systemInstruction: String = LiveCallProtocol.SYSTEM_INSTRUCTION,
+    /** v0.7.0: function declarations offered to the model in the setup (empty = a plain voice call, as before). */
+    val tools: List<LiveCallProtocol.LiveToolDecl> = emptyList(),
 )
 
 /**
@@ -63,6 +69,15 @@ class LiveCallSession(
     private val setupTimeoutMs: Long = 20_000L,
     /** Keys inside their quota cooldown (KeyHealthStore): tried last, never hard-skipped — same rule as home chat. */
     private val restingKeyIds: Set<String> = emptySet(),
+    /**
+     * v0.7.0: executes one function call the model made (name + JSON args) and returns its JSON result.
+     * Runs on a separate IO scope — a slow web fetch must never stall the call's audio. Null = no tools.
+     */
+    private val toolExecutor: (suspend (String, JSONObject) -> JSONObject)? = null,
+    /** v0.7.0: the model called end_call (the user said goodbye): the controller ends the call. */
+    private val onEndCall: (() -> Unit)? = null,
+    /** How long the farewell audio gets before [onEndCall] fires (injectable for tests). */
+    private val endCallDelayMs: Long = 2_000L,
 ) {
     interface Listener {
         /** The session is set up and the conversation is live (also after a silent resumption reconnect). */
@@ -91,6 +106,12 @@ class LiveCallSession(
         Executors.newSingleThreadExecutor { r -> Thread(r, "live-call-session") }.asCoroutineDispatcher() +
             SupervisorJob(),
     )
+
+    /** v0.7.0: tool execution lives here, never on the event thread (audio/transcription must not wait on a fetch). */
+    private val toolScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Call ids the server cancelled (user barged in): checked before executing and again before answering. */
+    private val cancelledCallIds: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
 
     // --- state (touched only on the event scope, except where @Volatile) ---
     private var transport: LiveTransport? = null
@@ -153,6 +174,7 @@ class LiveCallSession(
             userClosed = true
             ready = false
             readyVolatile = false
+            toolScope.cancel()
             flushTurn()
             runCatching { transport?.close(1000, "Call ended") }
             transport = null
@@ -232,6 +254,7 @@ class LiveCallSession(
                 resumptionHandle = handle,
                 model = models[modelIndex],
                 systemInstruction = config.systemInstruction,
+                tools = config.tools,
             ),
         )
     }
@@ -265,6 +288,37 @@ class LiveCallSession(
                 is LiveServerEvent.ResumptionUpdate -> {
                     resumable = event.resumable
                     if (!event.handle.isNullOrBlank()) resumptionHandle = event.handle
+                }
+                is LiveServerEvent.ToolCalls -> handleToolCalls(event.calls)
+                is LiveServerEvent.ToolCallCancelled -> cancelledCallIds += event.ids
+            }
+        }
+    }
+
+    /**
+     * v0.7.0: executes the model's function calls on [toolScope] (never blocking audio), then answers on the
+     * event thread through the SAME transport/attempt checks as every other send. A cancelled id is neither
+     * executed nor answered. end_call is answered like any other call; only after the answer goes out (and
+     * the farewell has had [endCallDelayMs] to play) does the controller hear about it.
+     */
+    private fun handleToolCalls(calls: List<LiveServerEvent.FunctionCall>) {
+        val executor = toolExecutor ?: return   // tools were never offered this call; a stray toolCall is ignored
+        val myAttempt = attempt
+        val from = transport ?: return
+        for (call in calls) {
+            if (call.id in cancelledCallIds) continue
+            toolScope.launch {
+                if (call.id in cancelledCallIds) return@launch
+                val response = runCatching { executor(call.name, call.args) }
+                    .getOrElse { e -> JSONObject().put("result", "That tool failed: ${e.message ?: "unknown error"}") }
+                if (call.id in cancelledCallIds) return@launch
+                eventScope.launch {
+                    if (userClosed || terminal || attempt != myAttempt || transport !== from) return@launch
+                    transport?.send(LiveCallProtocol.buildToolResponseJson(listOf(Triple(call.id, call.name, response))))
+                    if (call.name == LiveCallProtocol.END_CALL) {
+                        delay(endCallDelayMs)
+                        if (!userClosed && !terminal) onEndCall?.invoke()
+                    }
                 }
             }
         }
