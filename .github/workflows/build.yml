@@ -12,10 +12,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - name: Install SDK packages
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKM=$(ls $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager | sort | tail -1)
+          echo "sdkmanager: $SDKM"
+          yes | $SDKM --licenses > /dev/null 2>&1 || true
+          $SDKM "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
       - name: Unit tests + assemble debug
         run: |
           chmod +x gradlew
