@@ -196,7 +196,7 @@ private fun ThoughtsHeader(m: Message, onClick: () -> Unit) {
 fun DotGrid(size: androidx.compose.ui.unit.Dp = 18.dp) {
     val p = P
     var elapsed by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) {
+    if (!com.mazharansari.axion.ui.AnimationGate.inTestRuntime) LaunchedEffect(Unit) {
         val start = withFrameNanos { it }
         while (true) withFrameNanos { elapsed = (it - start) / 1_000_000_000f }
     }
@@ -213,6 +213,9 @@ fun DotGrid(size: androidx.compose.ui.unit.Dp = 18.dp) {
 @Composable
 fun ShimmerText(text: String) {
     val p = P
+    if (com.mazharansari.axion.ui.AnimationGate.inTestRuntime) {
+        Text(text, style = Type.body.copy(fontSize = 16.sp), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 300.dp)); return
+    }
     val t = rememberInfiniteTransition(label = "shimmer")
     val x by t.animateFloat(-300f, 900f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "x")
     Text(text, style = Type.body.copy(fontSize = 16.sp, brush = Brush.linearGradient(listOf(p.text2, p.text, p.text2),
@@ -222,6 +225,9 @@ fun ShimmerText(text: String) {
 
 @Composable
 internal fun PulseDot() {
+    if (com.mazharansari.axion.ui.AnimationGate.inTestRuntime) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(P.text)); return
+    }
     val t = rememberInfiniteTransition(label = "pulse")
     val a by t.animateFloat(0.3f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a")
     Box(Modifier.size(8.dp).graphicsLayer { alpha = a }.clip(CircleShape).background(P.text))
