@@ -51,6 +51,8 @@ class LiveCallController(
     private val onSystemLine: (String) -> Unit,
     private val onKeyExhausted: (keyId: String, quota: Boolean) -> Unit,
     private val onKeyActivated: (keyId: String) -> Unit,
+    /** v0.7.0: the call's tools (web research + phone control + end_call). Null = a plain voice call, as before. */
+    private val toolBridge: LiveToolBridge? = null,
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -150,9 +152,15 @@ class LiveCallController(
             transportFactory = { OkHttpLiveTransport() },
             credentials = credentials,
             autoSwitch = autoSwitch,
-            config = LiveCallConfig(voiceName = voiceName),
+            config = LiveCallConfig(
+                voiceName = voiceName,
+                systemInstruction = if (toolBridge != null) LiveCallProtocol.SYSTEM_INSTRUCTION + LiveCallProtocol.TOOL_GUIDANCE else LiveCallProtocol.SYSTEM_INSTRUCTION,
+                tools = toolBridge?.declarations ?: emptyList(),
+            ),
             listener = sessionListener,
             restingKeyIds = restingKeyIds,
+            toolExecutor = toolBridge?.let { bridge -> { name: String, args: org.json.JSONObject -> bridge.execute(name, args) } },
+            onEndCall = { stop() },
         )
         session = created
         created.start()
