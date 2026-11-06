@@ -35,7 +35,7 @@ class HistoryCompressionTest {
         val d = HistoryCompressor.decisionsIn("Use blue. Make it fast. The sky is nice. Never use red. Use blue.")
         assertTrue(d.any { it.startsWith("Use blue") }); assertTrue(d.none { it.contains("sky") })
         val many = HistoryCompressor.notesFor(null, (1..60).flatMap { listOf(UserItem("always use option number $it for this"), AssistantItem("ok")) })
-        assertTrue(many.lines().count { it.startsWith("   - ") } <= 14)
+        assertTrue(many.lines().count { it.startsWith("   - ") } <= 20)   // v0.6.1: the kept-decisions cap is 20
     }
     @Test fun windowNeverStartsWithAnAssistantTurn() {
         val r = HistoryCompressor.compress(longHistory(30), 3000); assertTrue(r.recent.first() is UserItem)
