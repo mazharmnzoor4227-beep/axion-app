@@ -187,18 +187,25 @@ private fun ThoughtsHeader(m: Message, onClick: () -> Unit) {
     }
 }
 
-/** Grok's thinking glyph: a 3×3 grid of dots whose brightness ripples diagonally. */
+/**
+ * The thinking glyph, redrawn 2026-11-06: the same composing ribbon-orb as the call screen, resolved
+ * at the thinking-orbs 20px preset — so "thinking" looks identical everywhere in the app. Same 18dp
+ * footprint and call sites as the old 3x3 grid; only the drawing changed.
+ */
 @Composable
 fun DotGrid(size: androidx.compose.ui.unit.Dp = 18.dp) {
     val p = P
-    val t = rememberInfiniteTransition(label = "grid")
-    val ph by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "ph")
+    var elapsed by remember { mutableFloatStateOf(0f) }
+    if (!com.mazharansari.axion.ui.AnimationGate.inTestRuntime) LaunchedEffect(Unit) {
+        val start = withFrameNanos { it }
+        while (true) withFrameNanos { elapsed = (it - start) / 1_000_000_000f }
+    }
     Canvas(Modifier.size(size)) {
-        val step = this.size.width / 3f; val r = step * 0.2f
-        for (i in 0..2) for (j in 0..2) {
-            val d = ((i + j) / 4f - ph).let { kotlin.math.abs(it - kotlin.math.round(it)) }
-            val a = (1f - d * 2.2f).coerceIn(0.25f, 1f)
-            drawCircle(p.text2.copy(alpha = a), r, androidx.compose.ui.geometry.Offset(step * (i + 0.5f), step * (j + 0.5f)))
+        val s = this.size.minDimension
+        for (d in com.mazharansari.axion.ui.settings.ThinkingOrbEngine.ribbonSmall(s, elapsed * 3.12f)) {
+            val ink = (1f - d.white).coerceIn(0f, 1f)
+            val col = androidx.compose.ui.graphics.lerp(p.bg, p.text, ink)
+            drawCircle(col.copy(alpha = d.a), d.r, androidx.compose.ui.geometry.Offset(d.x, d.y))
         }
     }
 }
@@ -206,6 +213,9 @@ fun DotGrid(size: androidx.compose.ui.unit.Dp = 18.dp) {
 @Composable
 fun ShimmerText(text: String) {
     val p = P
+    if (com.mazharansari.axion.ui.AnimationGate.inTestRuntime) {
+        Text(text, style = Type.body.copy(fontSize = 16.sp), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 300.dp)); return
+    }
     val t = rememberInfiniteTransition(label = "shimmer")
     val x by t.animateFloat(-300f, 900f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "x")
     Text(text, style = Type.body.copy(fontSize = 16.sp, brush = Brush.linearGradient(listOf(p.text2, p.text, p.text2),
@@ -215,6 +225,9 @@ fun ShimmerText(text: String) {
 
 @Composable
 internal fun PulseDot() {
+    if (com.mazharansari.axion.ui.AnimationGate.inTestRuntime) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(P.text)); return
+    }
     val t = rememberInfiniteTransition(label = "pulse")
     val a by t.animateFloat(0.3f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a")
     Box(Modifier.size(8.dp).graphicsLayer { alpha = a }.clip(CircleShape).background(P.text))
