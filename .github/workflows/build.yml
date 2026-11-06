@@ -1,7 +1,7 @@
-name: Verify Build (v0.7.1)
+name: Verify Build (orb)
 on:
   push:
-    branches: [axion-v071]
+    branches: [axion-orb]
   workflow_dispatch:
 jobs:
   build:
