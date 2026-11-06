@@ -33,6 +33,7 @@ import com.mazharansari.axion.ui.chat.AxionSheet
 import com.mazharansari.axion.ui.chat.SheetRow
 import com.mazharansari.axion.ui.components.*
 import com.mazharansari.axion.ui.settings.Orb
+import com.mazharansari.axion.ui.settings.OrbMode
 import com.mazharansari.axion.ui.theme.P
 import com.mazharansari.axion.ui.theme.Type
 import com.mazharansari.axion.voice.SameVoiceCall
@@ -156,6 +157,11 @@ private fun ColumnScope.LiveVoiceCallBody(vm: ChatViewModel, creds: List<ApiKeyC
     }
     CallBody(
         orbLevel = level,
+        orbMode = when (st.phase) {
+            LiveVoiceCall.Phase.LISTENING -> OrbMode.Listening
+            LiveVoiceCall.Phase.THINKING, LiveVoiceCall.Phase.SPEAKING -> OrbMode.Composing
+            else -> OrbMode.Frozen   // Connecting / Error / Ended: a still listening frame (owner's defaults, 2026-11-03)
+        },
         phaseText = when (st.phase) {
             LiveVoiceCall.Phase.CONNECTING -> "Connecting…"
             LiveVoiceCall.Phase.LISTENING -> if (st.muted) "Muted" else "Listening…"
@@ -194,6 +200,11 @@ private fun ColumnScope.SameVoiceCallBody(vm: ChatViewModel, voiceLabel: String,
     }
     CallBody(
         orbLevel = level,
+        orbMode = when (st.phase) {
+            SameVoiceCall.Phase.LISTENING -> OrbMode.Listening
+            SameVoiceCall.Phase.THINKING, SameVoiceCall.Phase.SPEAKING -> OrbMode.Composing
+            else -> OrbMode.Frozen
+        },
         phaseText = when (st.phase) {
             SameVoiceCall.Phase.LISTENING -> if (st.muted) "Muted" else "Listening…"
             SameVoiceCall.Phase.THINKING -> "Thinking…"
@@ -235,6 +246,11 @@ private fun ColumnScope.GeminiCall(vm: ChatViewModel, creds: List<ApiKeyCredenti
     LaunchedEffect(controller) { while (true) { delay(33); level += (controller.orbLevel() - level) * 0.3f } }
     CallBody(
         orbLevel = level,
+        orbMode = when (st.phase) {
+            LiveCallUiState.Phase.LISTENING -> OrbMode.Listening
+            LiveCallUiState.Phase.SPEAKING -> OrbMode.Composing
+            else -> OrbMode.Frozen   // Connecting / Error / Ended: a still listening frame (owner's defaults, 2026-11-03)
+        },
         phaseText = when (st.phase) {
             LiveCallUiState.Phase.CONNECTING -> "Connecting…"
             LiveCallUiState.Phase.LISTENING -> if (st.muted) "Muted" else "Listening…"
@@ -262,10 +278,11 @@ private fun ColumnScope.CallBody(
     orbLevel: Float, phaseText: String, sub: String, onSub: (() -> Unit)? = null, user: String, reply: String, status: String?, error: Boolean,
     muted: Boolean, onOrb: () -> Unit, onMute: () -> Unit, onEnd: () -> Unit,
     speaker: Boolean? = null, onSpeaker: () -> Unit = {}, boost: Boolean? = null, onBoost: () -> Unit = {},
+    orbMode: OrbMode = OrbMode.Listening,
 ) {
     val p = P
     Spacer(Modifier.weight(0.7f))
-    Box(Modifier.clip(RoundedCornerShape(50)).clickable(remember { MutableInteractionSource() }, null, onClick = onOrb)) { Orb(220.dp, orbLevel) }
+    Box(Modifier.clip(RoundedCornerShape(50)).clickable(remember { MutableInteractionSource() }, null, onClick = onOrb)) { Orb(220.dp, orbLevel, orbMode) }
     Spacer(Modifier.height(28.dp))
     Text(phaseText, style = Type.title, color = p.text)
     Text(sub, style = Type.small.copy(fontSize = 14.sp), color = p.text2, modifier = Modifier.padding(top = 6.dp).then(if (onSub != null) Modifier.clickable(onClick = onSub) else Modifier))
