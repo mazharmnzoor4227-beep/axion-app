@@ -26,6 +26,7 @@ import androidx.core.content.ContextCompat
 import com.mazharansari.axion.livecall.ApiKeyCredential
 import com.mazharansari.axion.livecall.LiveCallController
 import com.mazharansari.axion.livecall.LiveCallProtocol
+import com.mazharansari.axion.livecall.LiveToolBridge
 import com.mazharansari.axion.livecall.LiveCallUiState
 import com.mazharansari.axion.ui.ChatViewModel
 import com.mazharansari.axion.ui.chat.AxionSheet
@@ -209,14 +210,26 @@ private fun ColumnScope.SameVoiceCallBody(vm: ChatViewModel, voiceLabel: String,
 private fun ColumnScope.GeminiCall(vm: ChatViewModel, creds: List<ApiKeyCredential>, axVoice: AxVoice, onVoice: () -> Unit, back: () -> Unit) {
     val voice = axVoice.engineVoice
     val ctx = LocalContext.current
+    // v0.7.0: the call gets the same hands as chat — web research always (when switched on), phone control only
+    // with the owner's consent + the Tools-library switch + the accessibility service up, and end_call so
+    // "Axion ab tum jao" hangs up. The phone run lives exactly as long as the call (STOP overlay included).
+    val settings = vm.g.settings.state.value
+    val includePhone = settings.phoneConsent && com.mazharansari.axion.agent.ToolCatalog.isEnabled("phone_screen", settings.toolSwitches) &&
+        com.mazharansari.axion.phone.PhoneController.serviceUp.value
+    val bridge = remember { LiveToolBridge.build(vm.g.workspace, vm.g.skills, settings.toolSwitches, includePhone) }
     val controller = remember {
         LiveCallController(
             ctx, credentials = creds, autoSwitch = true, restingKeyIds = emptySet(), voiceName = voice,
             onTurn = { u, a -> if (!u.isNullOrBlank() || !a.isNullOrBlank()) vm.appendCallTurn(u.orEmpty(), a.orEmpty()) },
             onSystemLine = {}, onKeyExhausted = { _, _ -> }, onKeyActivated = {},
+            toolBridge = bridge,
         )
     }
-    DisposableEffect(controller) { controller.start(); onDispose { controller.stop() } }
+    DisposableEffect(controller) {
+        val phoneArmed = includePhone && com.mazharansari.axion.phone.PhoneController.beginRun()
+        controller.start()
+        onDispose { controller.stop(); if (phoneArmed) com.mazharansari.axion.phone.PhoneController.endRun() }
+    }
     val st by controller.uiState.collectAsState()
     var level by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(controller) { while (true) { delay(33); level += (controller.orbLevel() - level) * 0.3f } }
