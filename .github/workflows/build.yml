@@ -1,5 +1,7 @@
 name: Verify Build (axion-upgrade)
 on:
+  push:
+    branches: [verify-build]
   workflow_dispatch:
 jobs:
   build:
