@@ -396,30 +396,35 @@ private fun VoiceTile(title: String, tag: String, selected: Boolean, dim: Boolea
 }
 
 
-/** Voice Library orb (Grok frame 0:45): a dark glassy sphere with a slowly drifting violet/rose nebula and star specks, a soft white rim; breathes with [level]. */
+/**
+ * The orb, redrawn 2026-11-06 to the owner's 2026-11-03 choice: the two thinking-orbs he circled on the
+ * preview — listening (wave engine) and composing (ribbon engine), monochrome in the theme's own ink
+ * (see ThinkingOrbEngine for the ported math). Only this drawing changed: sizes, the [level] breathing
+ * and every call site's behaviour are as before. Frozen = a still listening frame (Connecting/Error/Ended).
+ */
 @Composable
-fun Orb(size: Dp, level: Float = 0f) {
-    val t = rememberInfiniteTransition(label = "orb")
-    val phase by t.animateFloat(0f, 6.2832f, infiniteRepeatable(tween(14000, easing = LinearEasing)), label = "phase")
-    val breathe by t.animateFloat(0.985f, 1.015f, infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "b")
-    val specks = remember { val r = java.util.Random(7); List(90) { Triple(r.nextFloat() * 6.28f, kotlin.math.sqrt(r.nextFloat()), r.nextFloat()) } }
-    Canvas(Modifier.size(size)) {
-        val r = this.size.minDimension / 2 * (breathe + level * 0.10f)
-        val c = center
-        drawCircle(Color(0xFF07070B), r, c)
-        val a = Offset(c.x + r * 0.30f * kotlin.math.cos(phase), c.y + r * 0.22f * kotlin.math.sin(phase))
-        val b = Offset(c.x - r * 0.28f * kotlin.math.cos(phase * 0.8f + 1f), c.y - r * 0.30f * kotlin.math.sin(phase * 0.8f + 1f))
-        drawCircle(Brush.radialGradient(listOf(Color(0x597B4DFF), Color(0x1F7B4DFF), Color.Transparent), a, r * 0.85f), r, c)
-        drawCircle(Brush.radialGradient(listOf(Color(0x4DFF5FA2), Color(0x14FF5FA2), Color.Transparent), b, r * 0.7f), r, c)
-        drawCircle(Brush.radialGradient(listOf(Color(0x265AA9FF), Color.Transparent), Offset(c.x, c.y + r * 0.35f), r * 0.6f), r, c)
-        specks.forEach { (ang0, d, s) ->
-            val ang = ang0 + phase * (0.15f + s * 0.25f); val rr = r * 0.92f * d
-            drawCircle(Color.White.copy(alpha = 0.2f + 0.7f * s), 0.5f + 1.4f * s * s, Offset(c.x + rr * kotlin.math.cos(ang), c.y + rr * kotlin.math.sin(ang)))
+fun Orb(size: Dp, level: Float = 0f, mode: OrbMode = OrbMode.Listening) {
+    val p = P
+    var elapsed by remember { mutableFloatStateOf(0f) }
+    if (mode != OrbMode.Frozen) {
+        LaunchedEffect(mode) {
+            val start = withFrameNanos { it }
+            while (true) withFrameNanos { elapsed = (it - start) / 1_000_000_000f }
         }
-        // glassy shading: dark edge, light rim, top-left highlight
-        drawCircle(Brush.radialGradient(0.0f to Color.Transparent, 0.78f to Color.Transparent, 1f to Color(0xB3000000), center = c, radius = r), r, c)
-        drawCircle(Brush.sweepGradient(listOf(Color(0x99FFFFFF), Color(0x6648E0FF), Color(0x33FFFFFF), Color(0x66FF4FD8), Color(0x99FFFFFF)), c), r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.2f))
-        drawCircle(Brush.radialGradient(listOf(Color(0x33FFFFFF), Color.Transparent), Offset(c.x - r * 0.4f, c.y - r * 0.45f), r * 0.45f), r, c)
+    }
+    Canvas(Modifier.size(size)) {
+        val s = this.size.minDimension
+        val dots = when (mode) {
+            OrbMode.Listening -> ThinkingOrbEngine.wave(s, elapsed * 4.388f, level, breathe = 1f + 0.015f * kotlin.math.sin(elapsed * 2.4f))
+            OrbMode.Composing -> ThinkingOrbEngine.ribbon(s, elapsed * 2.34f, level)
+            OrbMode.Frozen -> ThinkingOrbEngine.wave(s, 5.7f, 0f)
+        }
+        val dim = if (mode == OrbMode.Frozen) 0.72f else 1f
+        for (d in dots) {
+            val ink = (1f - d.white).coerceIn(0f, 1f)
+            val col = androidx.compose.ui.graphics.lerp(p.bg, p.text, ink)
+            drawCircle(col.copy(alpha = d.a * dim), d.r, Offset(d.x, d.y))
+        }
     }
 }
 
