@@ -123,6 +123,25 @@ object LiveCallProtocol {
 
     const val DEFAULT_VOICE = "Kore"
 
+    /** v0.7.0: one function declaration offered to the Live model in the setup message. */
+    data class LiveToolDecl(val name: String, val description: String, val parameters: JSONObject)
+
+    /** The synthetic tool the model calls to hang up (handled by the session, never by a real Tool). */
+    const val END_CALL = "end_call"
+
+    /**
+     * v0.7.0: appended to [SYSTEM_INSTRUCTION] when the call has tools (LiveToolBridge built): the model may
+     * research the web live, operate the phone, and end the call itself when the user says goodbye.
+     */
+    const val TOOL_GUIDANCE =
+        " You have tools in this call. When the user asks about anything current — news, prices, weather, scores — " +
+            "use web_search and browse_url instead of guessing, and briefly say what you found. " +
+            "When the user asks you to do something on the phone — open an app, send a WhatsApp message, search in the browser — " +
+            "use the phone tools and narrate briefly what you are doing. Some phone actions pause and ask the user to tap CONFIRM " +
+            "on the screen; when that happens, wait calmly for them. Never use the phone tools for banking or payment apps. " +
+            "When the user says goodbye — for example \"Axion ab tum jao\", \"chalo jao\" or \"bye\" — say one short warm goodbye " +
+            "and then call the end_call tool to end the call."
+
     /**
      * The setup message — the first and only message allowed before
      * `setupComplete`. [resumptionHandle] is null for a fresh session and
@@ -134,6 +153,7 @@ object LiveCallProtocol {
         resumptionHandle: String? = null,
         model: String = MODEL,
         systemInstruction: String = SYSTEM_INSTRUCTION,
+        tools: List<LiveToolDecl> = emptyList(),
     ): String {
         val voice = VOICES.firstOrNull { it.first == voiceName }?.first ?: DEFAULT_VOICE
         val affective = isAffective(model)
@@ -172,6 +192,15 @@ object LiveCallProtocol {
                 "contextWindowCompression",
                 JSONObject().put("slidingWindow", JSONObject()),
             )
+        if (tools.isNotEmpty()) {
+            val declarations = JSONArray()
+            tools.forEach { tool ->
+                declarations.put(
+                    JSONObject().put("name", tool.name).put("description", tool.description).put("parameters", tool.parameters),
+                )
+            }
+            setup.put("tools", JSONArray().put(JSONObject().put("functionDeclarations", declarations)))
+        }
         if (affective) {
             setup.getJSONObject("generationConfig").put("enableAffectiveDialog", true)
             // proactiveAudio is NOT sent: with it the model may decide to stay silent (seen in the live test: no reply audio).
@@ -250,7 +279,31 @@ object LiveCallProtocol {
                 events += LiveServerEvent.TurnComplete
             }
         }
+        root.optJSONObject("toolCall")?.optJSONArray("functionCalls")?.let { calls ->
+            val list = mutableListOf<LiveServerEvent.FunctionCall>()
+            for (i in 0 until calls.length()) {
+                val call = calls.optJSONObject(i) ?: continue
+                val name = call.optString("name")
+                if (name.isBlank()) continue
+                list += LiveServerEvent.FunctionCall(call.optString("id"), name, call.optJSONObject("args") ?: JSONObject())
+            }
+            if (list.isNotEmpty()) events += LiveServerEvent.ToolCalls(list)
+        }
+        root.optJSONObject("toolCallCancellation")?.optJSONArray("ids")?.let { ids ->
+            val set = mutableSetOf<String>()
+            for (i in 0 until ids.length()) ids.optString(i).takeIf { it.isNotBlank() }?.let { set += it }
+            if (set.isNotEmpty()) events += LiveServerEvent.ToolCallCancelled(set)
+        }
         return events
+    }
+
+    /** The client's answer to a toolCall: one functionResponse per executed call, matched by id + name. */
+    fun buildToolResponseJson(responses: List<Triple<String, String, JSONObject>>): String {
+        val out = JSONArray()
+        responses.forEach { (id, name, response) ->
+            out.put(JSONObject().put("id", id).put("name", name).put("response", response))
+        }
+        return JSONObject().put("toolResponse", JSONObject().put("functionResponses", out)).toString()
     }
 }
 
@@ -280,6 +333,15 @@ sealed interface LiveServerEvent {
 
     /** The latest session-resumption state; [handle] stays valid for 2 hours after the session ends. */
     data class ResumptionUpdate(val resumable: Boolean, val handle: String?) : LiveServerEvent
+
+    /** One function call the model wants executed (part of a [ToolCalls] batch). */
+    data class FunctionCall(val id: String, val name: String, val args: JSONObject) : LiveServerEvent
+
+    /** v0.7.0: the model asked for tools. The session executes them off the event thread and answers with a toolResponse. */
+    data class ToolCalls(val calls: List<FunctionCall>) : LiveServerEvent
+
+    /** The server cancelled these call ids (the user barged in): their responses must not be sent. */
+    data class ToolCallCancelled(val ids: Set<String>) : LiveServerEvent
 }
 
 /**
