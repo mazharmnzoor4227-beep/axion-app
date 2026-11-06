@@ -149,8 +149,7 @@ class LiveCallController(
         }
         player.start()
         val bridge = toolBridge
-        val toolExecutor: (suspend (String, org.json.JSONObject) -> org.json.JSONObject)? =
-            bridge?.let { b -> { name: String, args: org.json.JSONObject -> b.execute(name, args) } }
+        val toolExecutor = bridge?.let { b -> ToolExecutor { name, args -> b.execute(name, args) } }
         val created = LiveCallSession(
             transportFactory = { OkHttpLiveTransport() },
             credentials = credentials,
@@ -162,7 +161,7 @@ class LiveCallController(
             ),
             listener = sessionListener,
             restingKeyIds = restingKeyIds,
-            toolExecutor = toolExecutor,
+            toolExecutor = toolExecutor?.fn,
             onEndCall = { stop() },
         )
         session = created
@@ -263,3 +262,10 @@ private val HEADSET_TYPES = setOf(
     android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET, android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES, android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
     android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, android.media.AudioDeviceInfo.TYPE_USB_HEADSET, 26 /* TYPE_BLE_HEADSET */,
 )
+
+/**
+ * A named holder for the session's tool executor. The compiler could not infer the type of the
+ * suspend lambda when it was built inline inside `?.let {}` (CI compile error, 2026-11-06), so the
+ * function type lives here, stated once, in full.
+ */
+internal class ToolExecutor(val fn: suspend (String, org.json.JSONObject) -> org.json.JSONObject)
