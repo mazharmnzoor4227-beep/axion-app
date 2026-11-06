@@ -291,6 +291,7 @@ class LiveCallSession(
                 }
                 is LiveServerEvent.ToolCalls -> handleToolCalls(event.calls)
                 is LiveServerEvent.ToolCallCancelled -> cancelledCallIds += event.ids
+                is LiveServerEvent.FunctionCall -> Unit   // never delivered alone: the parser wraps calls in ToolCalls
             }
         }
     }
