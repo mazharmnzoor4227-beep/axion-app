@@ -7,6 +7,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings as AndroidSettings
+import androidx.core.app.NotificationManagerCompat
 import android.speech.tts.TextToSpeech
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -322,6 +324,16 @@ fun VoiceScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit = {}) 
                     ToggleRow(Gk.mic, "Wake word — “Hey Axion”", if (s.wakeWordEnabled) "On: listening in the background; saying Hey Axion opens a Live call" else "Off: say Hey Axion anywhere to open a Live call (uses the microphone in the background)", s.wakeWordEnabled) { v ->
                         vm.g.settings.update { it.copy(wakeWordEnabled = v) }
                         if (v) com.mazharansari.axion.wakeword.WakeWordService.start(ctx) else com.mazharansari.axion.wakeword.WakeWordService.stop(ctx)
+                    }
+                    // Phase F (v0.8.5): assistant announcements — Android itself must grant Notification access first; the toggle opens that system page when access is missing.
+                    val notifAccess = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+                    ToggleRow(Gk.bell, "Assistant announcements", if (!notifAccess) "Reads new WhatsApp / Telegram messages aloud — tap to grant Notification access first" else if (s.assistantAnnounce) "On: new messages are read aloud as they arrive" else "Off: read new WhatsApp / Telegram messages aloud as they arrive", s.assistantAnnounce && notifAccess) { v ->
+                        if (v && !notifAccess) {
+                            runCatching { ctx.startActivity(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        } else {
+                            vm.g.settings.update { it.copy(assistantAnnounce = v) }
+                            if (!v) com.mazharansari.axion.assistant.AssistantAnnouncer.stop()
+                        }
                     }
                     var ownCall by remember { mutableStateOf(VoicePrefs.callOwnVoice(ctx)) }
                     ToggleRow(Gk.phone, "Use my chosen voice in calls (a bit slower)", if (ownCall) "On: Gemini Live listens, ${VoiceCatalog.byId(active).name} speaks (≈1 s slower)" else "Off: fast live call in a Gemini voice (${VoiceCatalog.geminiTwin(VoiceCatalog.byId(active)).name})", ownCall) { v ->
