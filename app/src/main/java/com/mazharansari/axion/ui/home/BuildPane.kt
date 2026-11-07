@@ -139,6 +139,10 @@ private fun ProjectRow(vm: ChatViewModel, pr: com.mazharansari.axion.data.Projec
             Text(pr.name, style = Type.row, color = p.text, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             val ago = if (System.currentTimeMillis() - pr.updatedAt < 60_000) "just now" else android.text.format.DateUtils.getRelativeTimeSpanString(pr.updatedAt, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS).toString()
             Text(com.mazharansari.axion.ui.build.kindLabel(pr.kind) + (if (files >= 0) " · $files file${if (files == 1) "" else "s"}" else "") + " · $ago", style = Type.small, color = p.text2, maxLines = 1)
+            // v0.8.0 (Phase C): the owner asked for "Working" under a project whose turn is still
+            // running after he leaves it — the RunRegistry knows, even in the background.
+            val working = vm.g.runs.active.collectAsState().value.any { it.kind == com.mazharansari.axion.work.RunRegistry.Kind.BUILD && it.ownerId == pr.id }
+            if (working) Text("Working", style = Type.tiny.copy(fontWeight = FontWeight.SemiBold), color = Color(0xFF3FB950))
         }
         if (pr.deploy?.url != null) Box(Modifier.clip(RoundedCornerShape(50)).background(Color(0x293FB950)).padding(horizontal = 8.dp, vertical = 3.dp)) {
             Text("Live", style = Type.tiny.copy(fontWeight = FontWeight.SemiBold), color = Color(0xFF3FB950))
