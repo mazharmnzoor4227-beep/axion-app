@@ -198,6 +198,7 @@ class WakeWordService : Service(), RecognitionListener {
 
     private fun onWake() {
         stopListening()
+        com.mazharansari.axion.assistant.AssistantOrb.summon()   // v0.8.7: the character comes to the front when called
         val open = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_START_CALL, true)
