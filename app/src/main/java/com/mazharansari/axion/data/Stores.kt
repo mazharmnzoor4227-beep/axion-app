@@ -38,6 +38,8 @@ data class AppSettings(
     val wakeWordEnabled: Boolean = false,
     /** Phase F (v0.8.5): the assistant reads new message notifications aloud. Default OFF; also needs the system's Notification access grant. */
     val assistantAnnounce: Boolean = false,
+    /** Phase F (v0.8.7): Axion's floating character lives on the home screen (needs the Accessibility service, which hosts its window). Default ON — the owner's chosen main surface. */
+    val assistantOrb: Boolean = true,
     val pasteAsFile: String = "Always ask",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,
