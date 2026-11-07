@@ -318,6 +318,11 @@ fun VoiceScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit = {}) 
                         rspeed = next; ReadAloudPlayer.setSpeed(ctx, next)
                     }
                     ToggleRow(Gk.speaker, "Read answers aloud", "Speak every reply when it finishes", s.autoRead) { v -> vm.g.settings.update { it.copy(autoRead = v) } }
+                    // Phase B: wake word — the microphone foreground service runs only while this is on (needs the mic permission, already used by voice input).
+                    ToggleRow(Gk.mic, "Wake word — “Hey Axion”", if (s.wakeWordEnabled) "On: listening in the background; saying Hey Axion opens a Live call" else "Off: say Hey Axion anywhere to open a Live call (uses the microphone in the background)", s.wakeWordEnabled) { v ->
+                        vm.g.settings.update { it.copy(wakeWordEnabled = v) }
+                        if (v) com.mazharansari.axion.wakeword.WakeWordService.start(ctx) else com.mazharansari.axion.wakeword.WakeWordService.stop(ctx)
+                    }
                     var ownCall by remember { mutableStateOf(VoicePrefs.callOwnVoice(ctx)) }
                     ToggleRow(Gk.phone, "Use my chosen voice in calls (a bit slower)", if (ownCall) "On: Gemini Live listens, ${VoiceCatalog.byId(active).name} speaks (≈1 s slower)" else "Off: fast live call in a Gemini voice (${VoiceCatalog.geminiTwin(VoiceCatalog.byId(active)).name})", ownCall) { v ->
                         ownCall = v; VoicePrefs.setCallOwnVoice(ctx, v)
