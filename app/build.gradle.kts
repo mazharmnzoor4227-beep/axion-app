@@ -20,8 +20,8 @@ android {
         applicationId = "com.mazharansari.axion"
         minSdk = 26
         targetSdk = 28   // v0.4: PRoot must exec Ubuntu binaries from app storage (W^X applies from 29), same as Kodex
-        versionCode = 21
-        versionName = "0.7.1"
+        versionCode = 22
+        versionName = "0.7.2"
         vectorDrawables { useSupportLibrary = true }
         resourceConfigurations += listOf("en")   // v0.5.3: all UI text is English; drops library translations (smaller APK)
         ndk { abiFilters += "arm64-v8a" }
@@ -112,6 +112,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.animation:animation")
     implementation("dev.chrisbanes.haze:haze-android:1.1.1")
+    implementation("com.alphacephei:vosk-android:0.3.75")   // Phase B wake word: offline grammar spotting (model downloads separately, not bundled)
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
