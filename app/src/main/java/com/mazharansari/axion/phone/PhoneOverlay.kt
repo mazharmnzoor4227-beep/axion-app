@@ -22,17 +22,20 @@ import com.mazharansari.axion.ui.settings.ThinkingOrbEngine
 import com.mazharansari.axion.wakeword.WakeWordService
 
 /**
- * v0.8.1 — the phone-control popup, rebuilt to the owner's reference (2026-11-07): the old card sat
- * in the middle of the screen and covered whatever Axion was driving. Now the control surface is a
- * compact dynamic-bar pill at the top — the owner's own animated orb, one line of live status and a
- * small STOP — that he can DRAG anywhere on screen (it docks to the nearest edge when let go).
- * Tapping the pill opens the full card (status log, a Talk button that opens the Live voice call,
- * the big STOP, and the CONFIRM button); a pending CONFIRM opens the card by itself so it is never
- * hidden. Drawn as an accessibility overlay (no extra "draw over apps" permission); touches outside
- * the pill pass through to the app underneath.
+ * The phone-control surface. v0.8.4 (owner's correction, 2026-11-07): he asked for Android's own
+ * dynamic bar, not a custom-drawn lookalike — and no app can draw inside the system bar; the
+ * system renders it from notifications. So while the app's notifications are enabled, the surface
+ * IS a system notification ([PhoneControlNotify]: live status + STOP / CONFIRM / Talk actions),
+ * and nothing custom is drawn at all.
+ *
+ * The drawn strip below (v0.8.1's draggable orb pill) survives ONLY as the safety fallback for
+ * when notifications are turned off for the app — a phone run must never be left without a STOP.
+ * In notification mode none of it is built.
  */
 class PhoneOverlay(private val svc: AccessibilityService) {
     private val main = Handler(Looper.getMainLooper())
+    private var notifyMode = false
+    private var confirmAlerted = false
     private var root: LinearLayout? = null
     private var card: LinearLayout? = null
     private var pillStatus: TextView? = null
@@ -82,7 +85,13 @@ class PhoneOverlay(private val svc: AccessibilityService) {
     private fun cardBg() = GradientDrawable().apply { setColor(Color.parseColor("#F2121212")); cornerRadius = dp(18).toFloat(); setStroke(dp(1), Color.parseColor("#44FFFFFF")) }
 
     fun show() = main.post {
-        if (root != null) return@post
+        if (root != null || notifyMode) return@post
+        if (PhoneControlNotify.available(svc)) {
+            notifyMode = true
+            confirmAlerted = false
+            PhoneControlNotify.show(svc, listOf("Starting — tap STOP any time"), null)
+            return@post
+        }
         expanded = false
         // ---- the pill: orb + one-line status + compact STOP ----------------------------------
         val orb = OrbView(svc)
@@ -206,6 +215,13 @@ class PhoneOverlay(private val svc: AccessibilityService) {
     }
 
     fun update(lines: List<String>, confirmLabel: String? = null) = main.post {
+        if (notifyMode) {
+            // A waiting CONFIRM re-alerts once (heads-up) so it is not missed in the shade.
+            val alert = confirmLabel != null && !confirmAlerted
+            if (confirmLabel != null) confirmAlerted = true else confirmAlerted = false
+            PhoneControlNotify.show(svc, lines, confirmLabel, alert)
+            return@post
+        }
         val latest = lines.lastOrNull()?.takeIf { it.isNotBlank() } ?: "Working…"
         pillStatus?.text = latest
         logView?.text = lines.joinToString("\n").ifBlank { "Working…" }
@@ -218,6 +234,12 @@ class PhoneOverlay(private val svc: AccessibilityService) {
     }
 
     fun hide() = main.post {
+        if (notifyMode) {
+            notifyMode = false
+            confirmAlerted = false
+            PhoneControlNotify.hide(svc)
+            return@post
+        }
         val r = root ?: return@post
         root = null; card = null; pillStatus = null; logView = null; confirmView = null; orbView = null; lp = null; expanded = false
         runCatching { wm().removeView(r) }
