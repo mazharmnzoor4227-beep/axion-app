@@ -83,6 +83,13 @@ object PhoneSafety {
     /** v0.6.1: a number-verification screen ("Verify your phone number", "tasdeeq ke liye code") is sensitive even before any field is focused. */
     private val verifyScreen = Regex("\\b(verify|verification|tasdeeq)\\b.{0,40}\\b(number|phone|code|otp)\\b", RegexOption.IGNORE_CASE)
 
+    /**
+     * v0.8.6: labels longer than this are CONTENT, not prompts. A WhatsApp bubble quoting "your
+     * security code changed" (or a friend typing "otp daalo") must not poison the whole chat
+     * screen — real PIN/OTP prompts are short labels sitting next to a field.
+     */
+    private const val PROMPT_LABEL_MAX = 60
+
     /** null = fine to read/act; otherwise a short reason. */
     fun sensitiveScreen(pkg: String?, nodes: List<Node>): String? {
         if (isDeniedPackage(pkg)) return "this is a banking / payment / wallet / security app"
@@ -93,9 +100,21 @@ object PhoneSafety {
                 if (n.label.isNotBlank() && isDeniedHost(n.label)) return "the browser is on a banking / payment website"
             }
         }
-        nodes.firstOrNull { sensitiveText.containsMatchIn(it.label) || isBareSecretLabel(it.label) }?.let { return "the screen asks for a PIN, password, OTP or card details" }
-        nodes.firstOrNull { verifyScreen.containsMatchIn(it.label) && nodes.any { e -> e.editable } }?.let { return "the screen is verifying a number or account with a code" }
+        nodes.firstOrNull { it.label.length <= PROMPT_LABEL_MAX && (sensitiveText.containsMatchIn(it.label) || isBareSecretLabel(it.label)) }?.let { return "the screen asks for a PIN, password, OTP or card details" }
+        nodes.firstOrNull { it.label.length <= PROMPT_LABEL_MAX && verifyScreen.containsMatchIn(it.label) && nodes.any { e -> e.editable } }?.let { return "the screen is verifying a number or account with a code" }
         return null
+    }
+
+    /**
+     * v0.8.6: order for showing elements to the agent — what it can ACT on first (text fields,
+     * then tappables, then scrollable lists), reading text last. On dense screens (a long
+     * WhatsApp chat, YouTube) the compose field / send / skip buttons sit at the END of the
+     * tree and fell off the shown list; with this order they always survive. Stable: the
+     * on-screen order is kept inside each group.
+     */
+    fun prioritize(nodes: List<Node>): List<Node> {
+        fun rank(n: Node) = when { n.editable -> 0; n.clickable -> 1; n.scrollable -> 2; else -> 3 }
+        return nodes.sortedBy { rank(it) }
     }
 
     private val risky = Regex("^(send|delete|remove|pay|pay now|buy|buy now|purchase|place order|order|confirm|confirm order|submit|post|publish|tweet|share|transfer|donate|subscribe|uninstall|factory reset|erase|format|sign out|log out|logout|clear all|clear data|cancel subscription|unlock)\\b", RegexOption.IGNORE_CASE)
