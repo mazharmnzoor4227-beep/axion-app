@@ -40,7 +40,9 @@ class AxionNotificationListener : NotificationListenerService() {
         if (!NotifyInbox.offer(s.packageName, label, title, text, System.currentTimeMillis())) return
         val settings = runCatching { (application as AxionApp).graph.settings.state.value }.getOrNull() ?: return
         if (settings.assistantAnnounce) {
-            AssistantAnnouncer.speak(applicationContext, NotifyInbox.spokenLine(label, title, text))
+            val line = NotifyInbox.spokenLine(label, title, text)
+            AssistantAnnouncer.speak(applicationContext, line)
+            AssistantOrb.showMessage(line)   // v0.8.7: the popup comes out of the character
         }
     }
 }
