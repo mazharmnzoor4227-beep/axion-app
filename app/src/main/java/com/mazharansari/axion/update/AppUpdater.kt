@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
 import com.mazharansari.axion.BuildConfig
 import com.mazharansari.axion.llm.Http
+import com.mazharansari.axion.llm.ParallelFetch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -126,29 +127,16 @@ class AppUpdater(
     private fun apkFile(info: UpdateInfo) = File(dir, "Axion-${info.versionName}.apk")
 
     suspend fun download(info: UpdateInfo): UpdateState = withContext(Dispatchers.IO) {
-        dir.mkdirs(); dir.listFiles()?.filter { it.name != apkFile(info).name && it.name != apkFile(info).name + ".part" }?.forEach { it.delete() }
+        dir.mkdirs(); dir.listFiles()?.filter { it.name != apkFile(info).name && it.name != apkFile(info).name + ".part" && !it.name.startsWith(apkFile(info).name + ".part.seg") }?.forEach { it.delete() }
         val part = File(dir, apkFile(info).name + ".part")
         try {
-            var have = if (part.isFile) part.length() else 0L
-            val rb = Request.Builder().url(info.url).header("User-Agent", Http.UA)
-            if (have > 0) rb.header("Range", "bytes=$have-")
-            http.newCall(rb.build()).execute().use { r ->
-                if (r.code == 416) { have = 0; part.delete() }
-                if (!r.isSuccessful && r.code != 416) throw IOException("The download failed (${r.code}).")
-                val append = r.code == 206
-                if (!append) { have = 0 }
-                val total = (r.body?.contentLength() ?: -1L).let { if (it > 0) it + have else info.size }
-                _state.value = UpdateState.Downloading(info, have, total)
-                java.io.FileOutputStream(part, append).use { out ->
-                    val src = r.body!!.byteStream(); val buf = ByteArray(1 shl 16); var done = have; var lastEmit = 0L
-                    while (true) {
-                        val n = src.read(buf); if (n < 0) break
-                        out.write(buf, 0, n); done += n
-                        val now = System.currentTimeMillis()
-                        if (now - lastEmit > 150) { lastEmit = now; _state.value = UpdateState.Downloading(info, done, total) }
-                    }
-                }
+            // v0.8.0: one connection to the update host crawls on some networks (the owner's
+            // 11 MB update took ~10 minutes) — pull the file over parallel ranged connections
+            // when the server allows it; ParallelFetch says no and the single stream below runs.
+            val parallel = info.size >= 1_048_576L && ParallelFetch.fetch(http, info.url, part, expectedTotal = info.size) { d, t ->
+                _state.value = UpdateState.Downloading(info, d, t)
             }
+            if (!parallel) fetchSingle(info, part)
             _state.value = UpdateState.Verifying(info)
             if (info.size > 0 && part.length() != info.size) { part.delete(); return@withContext fail("The download was incomplete (${UpdateRules.mb(part.length())} of ${UpdateRules.mb(info.size)}). Try again.", info) }
             if (UpdateRules.sha256(part) != info.sha256) { part.delete(); return@withContext fail("The downloaded file didn't match its checksum, so it was deleted. Try again.", info) }
@@ -157,6 +145,30 @@ class AppUpdater(
             val f = apkFile(info); f.delete(); part.renameTo(f)
             UpdateState.Ready(info, f).also { _state.value = it }
         } catch (e: Exception) { fail(UpdateRules.friendly(e), info) }
+    }
+
+    /** The classic one-stream download (with .part resume), used when ranged parallel fetch isn't possible. */
+    private fun fetchSingle(info: UpdateInfo, part: File) {
+        var have = if (part.isFile) part.length() else 0L
+        val rb = Request.Builder().url(info.url).header("User-Agent", Http.UA)
+        if (have > 0) rb.header("Range", "bytes=$have-")
+        http.newCall(rb.build()).execute().use { r ->
+            if (r.code == 416) { have = 0; part.delete() }
+            if (!r.isSuccessful && r.code != 416) throw IOException("The download failed (${r.code}).")
+            val append = r.code == 206
+            if (!append) { have = 0 }
+            val total = (r.body?.contentLength() ?: -1L).let { if (it > 0) it + have else info.size }
+            _state.value = UpdateState.Downloading(info, have, total)
+            java.io.FileOutputStream(part, append).use { out ->
+                val src = r.body!!.byteStream(); val buf = ByteArray(1 shl 16); var done = have; var lastEmit = 0L
+                while (true) {
+                    val n = src.read(buf); if (n < 0) break
+                    out.write(buf, 0, n); done += n
+                    val now = System.currentTimeMillis()
+                    if (now - lastEmit > 150) { lastEmit = now; _state.value = UpdateState.Downloading(info, done, total) }
+                }
+            }
+        }
     }
 
     private fun fail(msg: String, info: UpdateInfo?) = UpdateState.Failed(msg, info).also { _state.value = it }
