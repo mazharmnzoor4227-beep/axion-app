@@ -525,7 +525,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         com.mazharansari.axion.phone.PhoneController.onStopRequested = { viewModelScope.launch(Dispatchers.Main.immediate) { stopSession(sess) } }
                     }
                     Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }).run(
-                        history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, buf) }, sink = sink,
+                        history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }) }, sink = sink,
                         profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
                         intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools
                     )
@@ -664,7 +664,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Tests: replaces the model list (a fake model) while everything else in the send path stays real. */
     internal var debugAttempts: ((Mode, Boolean) -> List<Attempt>)? = null
 
-    internal fun attempts(mode: Mode, quick: Boolean = false, waitBuf: StreamBuffer? = null): List<Attempt> {
+    internal fun attempts(mode: Mode, quick: Boolean = false, onFreeWait: ((Int) -> Unit)? = null): List<Attempt> {
         debugAttempts?.let { return it(mode, quick) }
         val pairs = g.connectors.attempts(mode).let { if (quick) quickOrder(it) { p -> p.second } else it }
         // v0.5.2 speed: one lazily-made client per key (was: a key decrypt for every model on every key, before the first request).
@@ -674,7 +674,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             Attempt(c.provider.name, model, cl, onFail = { e -> g.connectors.coolDown(c, model, e) })
         }
         // v0.5.2: labelled "Free (slow)" (was "openai"); its 45 s rate limit is waited out with a visible countdown.
-        val free = listOf(Attempt(FreeFallback.NAME, FreeFallback.NAME, FreeFallback.Client(onWait = { secs -> waitBuf?.let { freeWaitNotice(it, secs) } }), patientMs = FreeFallback.PATIENT_MS))
+        val free = listOf(Attempt(FreeFallback.NAME, FreeFallback.NAME, FreeFallback.Client(onWait = { secs -> onFreeWait?.invoke(secs) }), patientMs = FreeFallback.PATIENT_MS))
         // v0.5 (addendum 6): the user's own models. Picked in the model menu → they go first; otherwise they're the backup
         // after the API keys and before Free (slow).
         val pick = g.settings.state.value.mode
