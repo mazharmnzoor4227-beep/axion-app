@@ -100,12 +100,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private var job: Job? = null
+    /**
+     * v0.8.0 (Phase C): every run in flight, keyed by its conversation id. A run owns its
+     * conversation's messages end to end (see RunSession), so leaving a chat or a project —
+     * or the app being pushed into the background — never stops or moves its work.
+     */
+    private val sessions = LinkedHashMap<String, RunSession>()
+
+    /** [running] always means: the OPEN conversation has a live session. */
+    private fun refreshRunning() { running = conversationId?.let { sessions.containsKey(it) } == true }
+
+    /** The session belonging to the open conversation, if one is in flight. */
+    private fun openSession(): RunSession? = conversationId?.let { sessions[it] }
     private var createdAt = 0L
 
     fun newChat(into: Section = section) {
-        stop(); conversationId = null; title = ""; messages = emptyList(); pending.clear(); draft = ""; section = into
+        // v0.8.0: no stop() — a run in the chat being left keeps working in the background.
+        conversationId = null; title = ""; messages = emptyList(); pending.clear(); draft = ""; section = into
         if (into != Section.BUILD) projectId = null
+        refreshRunning()
     }
 
     // ── v0.5 Build projects ────────────────────────────────────────────────────────────────────────────────────────
@@ -170,19 +183,28 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openProject(id: String) {
         val p = g.build.store.get(id) ?: return
-        stop()
+        // v0.8.0: no stop() — the project being left keeps working (its row shows "Working").
         projectId = id; section = Section.BUILD; undoAvailable = undoPoints.containsKey(id); pendingReview = null; loadPending(p)   // axion-p1.2
         conversationId = null; title = p.name; messages = emptyList(); pending.clear(); draft = ""
+        refreshRunning()
+        // v0.8.0: this project's turn is still running — show its live messages, not a stale saved copy.
+        val sess = p.conversationId?.let { sessions[it] }
+        if (sess != null) {
+            conversationId = sess.convId; title = p.name; messages = sess.msgs; createdAt = sess.createdAt
+            refreshRunning()
+            return
+        }
         p.conversationId?.let { cid ->
             viewModelScope.launch {
                 val c = g.chats.load(cid) ?: return@launch
                 if (projectId != id) return@launch
                 conversationId = c.id; title = p.name; messages = c.messages; createdAt = c.createdAt
+                refreshRunning()
             }
         }
     }
 
-    fun closeProject() { stop(); projectId = null; conversationId = null; messages = emptyList(); title = "" }
+    fun closeProject() { projectId = null; conversationId = null; messages = emptyList(); title = ""; refreshRunning() }   // v0.8.0: leaving never stops a run
 
     /** Creates a project and opens its chat. [firstPrompt] (from a template) is sent right away. */
     fun createProject(name: String, kind: String, firstPrompt: String? = null): String {
@@ -210,8 +232,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun open(id: String) {
         if (id == conversationId) return
-        stop()
+        // v0.8.0: no stop() — the chat being left keeps working in the background.
         opening = id
+        val sess = sessions[id]
+        if (sess != null) {
+            // This chat is still working — show its live messages, not the last saved copy.
+            opening = null
+            conversationId = sess.convId; title = sess.title; messages = sess.msgs; createdAt = sess.createdAt
+            section = sess.section
+            projectId = if (sess.section == Section.BUILD) sess.ownerId else null
+            undoAvailable = projectId?.let { undoPoints.containsKey(it) } == true
+            pendingReview = null; projectId?.let { pid -> g.build.store.get(pid)?.let { loadPending(it) } }   // axion-p1.2
+            refreshRunning()
+            return
+        }
         viewModelScope.launch {
             val c = g.chats.load(id) ?: return@launch
             if (opening != id) return@launch   // v0.5.2: two quick taps in the drawer — the last one wins
@@ -221,6 +255,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             projectId = if (section == Section.BUILD) g.build.store.projectFor(c.id)?.id else null
             undoAvailable = projectId?.let { undoPoints.containsKey(it) } == true
             pendingReview = null; projectId?.let { id -> g.build.store.get(id)?.let { loadPending(it) } }   // axion-p1.2
+            refreshRunning()
         }
     }
 
@@ -326,19 +361,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun stop() {
         com.mazharansari.axion.phone.PhoneController.stop("You pressed Stop")   // axion-p3: the phone token dies first, instantly
-        val j = job ?: return
-        job = null
-        live?.let { (aid, buf) ->
-            synchronized(buf) { buf.closed = true; buf.dirty = true }
-            flush(aid, buf, force = true)
-            messages = messages.map { if (it.id == aid) it.copy(status = MsgStatus.INTERRUPTED, notice = "", thinkingMs = System.currentTimeMillis() - it.createdAt,
-                steps = it.steps.map { st -> if (st.status == StepStatus.RUNNING) st.copy(status = StepStatus.ERROR, endedAt = System.currentTimeMillis()) else st }) else it }
-        }
-        live = null
-        running = false
-        j.cancel()
+        val sess = openSession() ?: return
+        stopSession(sess)
+    }
+
+    /**
+     * v0.8.0: freeze ONE run where it stands — its own conversation keeps the partial reply,
+     * marked stopped; every other run in flight is untouched. The stop button acts on the open
+     * conversation's session; a phone run's own stop request acts on its own session.
+     */
+    private fun stopSession(sess: RunSession) {
+        sessions.remove(sess.convId)
+        val buf = sess.buf
+        synchronized(buf) { buf.closed = true; buf.dirty = true }
+        flush(sess, force = true)
+        sess.msgs = sess.msgs.map { if (it.id == sess.aid) it.copy(status = MsgStatus.INTERRUPTED, notice = "", thinkingMs = System.currentTimeMillis() - it.createdAt,
+            steps = it.steps.map { st -> if (st.status == StepStatus.RUNNING) st.copy(status = StepStatus.ERROR, endedAt = System.currentTimeMillis()) else st }) else it }
+        if (conversationId == sess.convId) messages = sess.msgs
+        refreshRunning()
+        sess.job?.cancel()
         g.speaker.stop()
-        persist(true)
+        persist(sess, immediate = true)
     }
 
     /**
@@ -347,8 +390,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      */
     var section by mutableStateOf(Section.ASK)
 
-    /** The reply being generated right now (stop() freezes it). */
-    private var live: Pair<String, StreamBuffer>? = null
 
     /** Test hook: null = ask Android. */
     var debugOnline: Boolean? = null
@@ -391,6 +432,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         g.chats.save(Conversation(id, title, messages, createdAt = createdAt, updatedAt = System.currentTimeMillis(), section = section.id), immediate)
     }
 
+    /** v0.8.0: save a run's OWN conversation (never the one that happens to be open). */
+    private fun persist(sess: RunSession, immediate: Boolean = false) {
+        g.chats.save(Conversation(sess.convId, sess.title, sess.msgs, createdAt = sess.createdAt, updatedAt = System.currentTimeMillis(), section = sess.section.id), immediate)
+    }
+
     private fun runAgent() {
         val s = g.settings.state.value
         val mode = runCatching { Mode.valueOf(s.mode) }.getOrDefault(Mode.AUTO)
@@ -409,18 +455,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val userItem = UserItem(u.text.ifBlank { "Look at the attached file(s)." } + attachmentNote(u.attachments), media(u.attachments))
         val aid = UUID.randomUUID().toString()
         val started = System.currentTimeMillis()
-        messages = messages + Message(aid, Role.ASSISTANT, status = MsgStatus.STREAMING, thinkingStartedAt = started, createdAt = started)
-        running = true
-        persist(true)
+        // v0.8.0 (Phase C): capture EVERYTHING this run needs right now — its conversation, its
+        // messages, its project. From here on the run works only on its own session, so the user
+        // can open other chats and projects while it works; nothing is re-read later.
+        val convId = conversationId ?: return
+        val sess = RunSession(
+            aid = aid, convId = convId,
+            kind = if (sec == Section.BUILD) com.mazharansari.axion.work.RunRegistry.Kind.BUILD else com.mazharansari.axion.work.RunRegistry.Kind.ASK,
+            ownerId = if (sec == Section.BUILD) projectId else convId,
+            title = title, section = sec, createdAt = createdAt, pid = projectId,
+            buf = StreamBuffer(),
+            msgs = messages + Message(aid, Role.ASSISTANT, status = MsgStatus.STREAMING, thinkingStartedAt = started, createdAt = started),
+        )
+        sessions[convId] = sess
+        messages = sess.msgs
+        refreshRunning()
+        persist(sess, immediate = true)
 
-        val buf = StreamBuffer()
-        live = aid to buf
+        val buf = sess.buf
         val tapped = sendTappedAt.takeIf { it > 0 && started - it < 5_000 } ?: started
         sendTappedAt = 0
         var requestAt = 0L; var firstAt = 0L
-        job = viewModelScope.launch {
+        sess.job = viewModelScope.launch {
+            // v0.8.0 (Phase C): register this run so WorkService keeps the process alive in the
+            // background and the projects list / chat drawer can show it as Working.
+            g.runs.register("run-$aid", sess.kind, sess.ownerId, sess.title.ifBlank { "Working" }, coroutineContext[kotlinx.coroutines.Job]!!, started)
+            com.mazharansari.axion.work.WorkService.refresh(getApplication())   // the notification now lists this run too
             // UI ticker: at most ~16 updates/s however fast tokens arrive, so long answers never jank the list.
-            val ticker = launch { while (isActive) { delay(45); flush(aid, buf) } }   // v0.4: ~22 UI updates/s while streaming
+            val ticker = launch { while (isActive) { delay(45); flush(sess) } }   // v0.4: ~22 UI updates/s while streaming
             val sink = object : AgentSink {
                 override fun reasoning(delta: String) { synchronized(buf) { if (buf.closed) return; buf.reasoning.append(delta); buf.dirty = true } }
                 override fun textToThoughts() = synchronized(buf) {
@@ -437,7 +499,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 override fun plan(steps: List<PlanStep>) = synchronized(buf) { buf.plan = steps; buf.dirty = true }   // axion-p2
                 override fun usedTool(title: String) = synchronized(buf) { buf.used += title; buf.dirty = true }      // axion-p3
                 override fun model(label: String) = synchronized(buf) { buf.model = label; buf.dirty = true }
-                override fun switching(label: String) = synchronized(buf) { buf.notice = "Switching to $label…"; buf.dirty = true }
+                override fun switching(label: String) = synchronized(buf) { buf.notice = "Switching to $label\u2026"; buf.dirty = true }
                 override fun discardRound() = synchronized(buf) { buf.text.setLength(buf.roundStart); buf.dirty = true }
                 override fun text(delta: String) { synchronized(buf) { if (buf.closed) return; buf.text.append(delta); buf.notice = ""; buf.dirty = true } }
                 override fun requestStart() { if (requestAt == 0L) requestAt = System.currentTimeMillis() }
@@ -445,13 +507,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 override fun firstToken() {
                     if (firstAt != 0L) return
                     firstAt = System.currentTimeMillis()
-                    viewModelScope.launch(Dispatchers.Main.immediate) { flush(aid, buf) }
+                    viewModelScope.launch(Dispatchers.Main.immediate) { flush(sess) }
                 }
             }
             var status = MsgStatus.DONE; var error = ""
             var phoneStarted = false
             try {
-                val pid = projectId
+                val pid = sess.pid
                 if (sec == Section.BUILD && pid != null) withContext(Dispatchers.Default) { runBuildTurn(pid, u, sink) }
                 else withContext(Dispatchers.Default) {
                     // axion-p3 phone control: a run token exists only for this turn, only with the user's consent + the switch ON + the service enabled.
@@ -460,10 +522,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     if (s.phoneConsent && com.mazharansari.axion.agent.ToolCatalog.isEnabled("phone_screen", s.toolSwitches) &&
                         com.mazharansari.axion.phone.PhoneController.beginRun()) {
                         phoneStarted = true
-                        com.mazharansari.axion.phone.PhoneController.onStopRequested = { viewModelScope.launch(Dispatchers.Main.immediate) { stop() } }
+                        com.mazharansari.axion.phone.PhoneController.onStopRequested = { viewModelScope.launch(Dispatchers.Main.immediate) { stopSession(sess) } }
                     }
                     Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }).run(
-                        history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick) }, sink = sink,
+                        history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, buf) }, sink = sink,
                         profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
                         intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools
                     )
@@ -474,21 +536,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             catch (e: Throwable) { status = MsgStatus.ERROR; error = e.message ?: e.toString() }
             ticker.cancel()
             if (phoneStarted) { com.mazharansari.axion.phone.PhoneController.onStopRequested = null; com.mazharansari.axion.phone.PhoneController.endRun() }   // axion-p3: token ends with the turn
-            if (buf.closed) return@launch   // Stop already froze this reply
+            if (buf.closed) { sessions.remove(convId); refreshRunning(); return@launch }   // Stop already froze this reply into its own conversation
             withContext(NonCancellable) {
-                live = null
-                buf.dirty = true; flush(aid, buf)
-                messages = messages.map {
+                buf.dirty = true; flush(sess)
+                sess.msgs = sess.msgs.map {
                     if (it.id == aid) it.copy(status = status, error = com.mazharansari.axion.security.SecretScanner.scrub(error), notice = "", thinkingMs = System.currentTimeMillis() - started,
                         firstWordMs = if (firstAt > 0) firstAt - tapped else 0, prepMs = if (requestAt > 0) requestAt - tapped else 0,
                         steps = it.steps.map { st -> if (st.status == StepStatus.RUNNING) st.copy(status = StepStatus.ERROR, endedAt = System.currentTimeMillis()) else st },
                         plan = it.plan.map { ps -> if (ps.status == PlanStatus.RUNNING) ps.copy(status = PlanStatus.FAILED, note = ps.note.ifBlank { "stopped" }) else ps })   // axion-p2
                     else it
                 }
-                running = false
+                if (conversationId == convId) messages = sess.msgs
+                sessions.remove(convId)
+                refreshRunning()
                 if (requestAt > 0) lastTiming = (requestAt - tapped) to (if (firstAt > 0) firstAt - tapped else -1L)
-                persist(true)
-                if (status == MsgStatus.DONE && s.autoRead) messages.lastOrNull()?.let { speak(it) }
+                persist(sess, immediate = true)
+                if (status == MsgStatus.DONE && s.autoRead) sess.msgs.firstOrNull { it.id == aid }?.let { speak(it) }
             }
         }
     }
@@ -538,6 +601,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (out.problems.isNotEmpty()) sink.text("\n\n**Still not fixed after ${out.rounds} rounds:**\n" + out.problems.take(6).joinToString("\n") { "- " + it.lines().first() })
     }
 
+    /**
+     * v0.8.0 (Phase C): one run in flight. It owns its conversation's message list end to end:
+     * streaming writes [msgs] (through [buf]) and completion saves [msgs] — the screen's
+     * [messages] is only a mirror while this conversation is open. That split is what lets a
+     * chat turn and a project turn run at the same time without ever writing into each other.
+     */
+    private class RunSession(
+        val aid: String,
+        val convId: String,
+        val kind: com.mazharansari.axion.work.RunRegistry.Kind,
+        /** Project id for a BUILD run, the conversation id for an ASK run. */
+        val ownerId: String?,
+        val title: String,
+        val section: Section,
+        val createdAt: Long,
+        /** The Build project this run works in (null for Ask). Captured at send — never re-read. */
+        val pid: String?,
+        val buf: StreamBuffer,
+        var msgs: List<Message>,
+    ) {
+        var job: Job? = null
+    }
+
     private class StreamBuffer {
         val text = StringBuilder(); val reasoning = StringBuilder(); val steps = ArrayList<Step>(); val artifacts = ArrayList<Artifact>()
         @Volatile var plan: List<PlanStep> = emptyList()   // axion-p2
@@ -546,17 +632,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         @Volatile var closed = false
     }
 
-    private fun flush(id: String, b: StreamBuffer, force: Boolean = false) {
+    /**
+     * v0.8.0: copy a run's buffer into ITS OWN conversation's messages; the screen mirrors it
+     * only while that conversation is open. (Before Phase C this wrote into whatever chat was
+     * open — the reason a run could not outlive its screen.)
+     */
+    private fun flush(sess: RunSession, force: Boolean = false) {
+        val b = sess.buf
         val snap = synchronized(b) {
             if (!b.dirty || (b.closed && !force)) return
             b.dirty = false
             Triple(b.text.toString(), b.reasoning.toString(), Triple(b.steps.toList(), b.artifacts.toList(), b.model)) to b.notice
         }
         val (s0, notice) = snap
-        messages = messages.map {
-            if (it.id == id) it.copy(text = s0.first, reasoning = s0.second, steps = s0.third.first, artifacts = s0.third.second, model = s0.third.third, notice = notice, plan = b.plan, usedTools = b.used.toList()) else it
+        sess.msgs = sess.msgs.map {
+            if (it.id == sess.aid) it.copy(text = s0.first, reasoning = s0.second, steps = s0.third.first, artifacts = s0.third.second, model = s0.third.third, notice = notice, plan = b.plan, usedTools = b.used.toList()) else it
         }
-        persist()
+        if (conversationId == sess.convId) messages = sess.msgs
+        persist(sess)
     }
 
     /**
@@ -564,15 +657,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * (Pollinations, no key) only when nothing else is left. Antigravity is never used here.
      */
     /** "Free model is busy — retrying in 12 s…" under Thinking while Free (slow) waits out its limit. */
-    private fun freeWaitNotice(secs: Int) {
-        val b = live?.second ?: return
+    private fun freeWaitNotice(b: StreamBuffer, secs: Int) {
         synchronized(b) { if (b.closed) return; b.notice = if (secs > 0) "Free model is busy — retrying in $secs s…" else ""; b.dirty = true }
     }
 
     /** Tests: replaces the model list (a fake model) while everything else in the send path stays real. */
     internal var debugAttempts: ((Mode, Boolean) -> List<Attempt>)? = null
 
-    internal fun attempts(mode: Mode, quick: Boolean = false): List<Attempt> {
+    internal fun attempts(mode: Mode, quick: Boolean = false, waitBuf: StreamBuffer? = null): List<Attempt> {
         debugAttempts?.let { return it(mode, quick) }
         val pairs = g.connectors.attempts(mode).let { if (quick) quickOrder(it) { p -> p.second } else it }
         // v0.5.2 speed: one lazily-made client per key (was: a key decrypt for every model on every key, before the first request).
@@ -582,7 +674,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             Attempt(c.provider.name, model, cl, onFail = { e -> g.connectors.coolDown(c, model, e) })
         }
         // v0.5.2: labelled "Free (slow)" (was "openai"); its 45 s rate limit is waited out with a visible countdown.
-        val free = listOf(Attempt(FreeFallback.NAME, FreeFallback.NAME, FreeFallback.Client(onWait = ::freeWaitNotice), patientMs = FreeFallback.PATIENT_MS))
+        val free = listOf(Attempt(FreeFallback.NAME, FreeFallback.NAME, FreeFallback.Client(onWait = { secs -> waitBuf?.let { freeWaitNotice(it, secs) } }), patientMs = FreeFallback.PATIENT_MS))
         // v0.5 (addendum 6): the user's own models. Picked in the model menu → they go first; otherwise they're the backup
         // after the API keys and before Free (slow).
         val pick = g.settings.state.value.mode
@@ -685,5 +777,5 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    override fun onCleared() { job?.cancel(); g.speaker.stop() }
+    override fun onCleared() { sessions.values.forEach { it.job?.cancel() }; g.speaker.stop() }
 }
