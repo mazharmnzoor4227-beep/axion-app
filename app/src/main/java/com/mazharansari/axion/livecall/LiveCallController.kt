@@ -53,6 +53,8 @@ class LiveCallController(
     private val onKeyActivated: (keyId: String) -> Unit,
     /** v0.7.0: the call's tools (web research + phone control + end_call). Null = a plain voice call, as before. */
     private val toolBridge: LiveToolBridge? = null,
+    /** v0.8.2: the conversation this call belongs to, as a transcript block (see CallContext) — the call's memory. */
+    private val contextBlock: String = "",
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -156,7 +158,9 @@ class LiveCallController(
             autoSwitch = autoSwitch,
             config = LiveCallConfig(
                 voiceName = voiceName,
-                systemInstruction = if (toolBridge != null) LiveCallProtocol.SYSTEM_INSTRUCTION + LiveCallProtocol.TOOL_GUIDANCE else LiveCallProtocol.SYSTEM_INSTRUCTION,
+                systemInstruction = LiveCallProtocol.SYSTEM_INSTRUCTION +
+                    (if (contextBlock.isNotBlank()) "\n\n$contextBlock" else "") +
+                    (if (toolBridge != null) LiveCallProtocol.TOOL_GUIDANCE else ""),
                 tools = toolBridge?.declarations ?: emptyList(),
             ),
             listener = sessionListener,
