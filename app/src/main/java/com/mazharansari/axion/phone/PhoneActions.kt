@@ -25,7 +25,7 @@ interface PhoneBackend {
  * logs the step for the live overlay, and lets the screen settle. Refusals carry exit code [REFUSED] so the fault policy does not blindly retry them.
  */
 class PhoneActions(private val backend: PhoneBackend, private val gate: PhoneGate, private val settleMs: Long = 700) {
-    companion object { const val REFUSED = 126; const val MAX_NODES = 70 }
+    companion object { const val REFUSED = 126; const val MAX_NODES = 100 }
     @Volatile private var last: PhoneScreen? = null
 
     private fun refuse(msg: String) = ToolOutput(msg, isError = true, exitCode = REFUSED)
@@ -53,13 +53,16 @@ class PhoneActions(private val backend: PhoneBackend, private val gate: PhoneGat
     private fun describe(n: PhoneSafety.Node): String {
         val role = when { n.password -> "password field"; n.editable -> "text field"; n.clickable && n.className.contains("Button") -> "button"; n.clickable -> "tappable"; n.scrollable -> "scrollable list"; n.className.contains("Image") -> "image"; else -> "text" }
         val flags = buildList { if (n.checked == true) add("on") else if (n.checked == false) add("off") }
-        return "[${n.id}] $role" + (n.label.takeIf { it.isNotBlank() }?.let { " \"${it.replace('\n', ' ').take(80)}\"" } ?: "") + (if (flags.isNotEmpty()) " (${flags.joinToString()})" else "")
+        // v0.8.6: the resource-id tail ("entry", "send", "skip_ad_button"…) identifies the acting
+        // elements far better than a blank label — show it when the label alone would not.
+        val vid = n.viewId.substringAfterLast('/').takeIf { it.isNotBlank() && it != n.viewId }
+        return "[${n.id}] $role" + (n.label.takeIf { it.isNotBlank() }?.let { " \"${it.replace('\n', ' ').take(80)}\"" } ?: "") + (vid?.let { " (id: $it)" } ?: "") + (if (flags.isNotEmpty()) " (${flags.joinToString()})" else "")
     }
 
     suspend fun screen(): ToolOutput {
         precheck()?.let { return it }
         val (s, bad) = look(); if (bad != null) return bad
-        s!!; val shown = s.nodes.take(MAX_NODES)
+        s!!; val shown = PhoneSafety.prioritize(s.nodes).take(MAX_NODES)
         gate.log("👁 Reading ${s.label.ifBlank { s.pkg }}")
         return ToolOutput("App: ${s.label.ifBlank { s.pkg }} (${s.pkg})\n" + shown.joinToString("\n") { describe(it) } + if (s.nodes.size > shown.size) "\n… ${s.nodes.size - shown.size} more items (scroll)" else "")
     }
