@@ -68,6 +68,13 @@ class Graph(val app: Application) {
     // v0.5 — Build projects (preview, deploy, APK) and on-device models.
     val build by lazy { com.mazharansari.axion.build.BuildHub(app, linux, devtools) }
     val updater by lazy { com.mazharansari.axion.update.AppUpdater(app) }
+    /** v0.8.0 (Phase C): every chat/Build run in flight; WorkService keeps the process alive while this is non-empty. */
+    val runs by lazy {
+        com.mazharansari.axion.work.RunRegistry().also { r ->
+            r.onFirstRunStarted = { com.mazharansari.axion.work.WorkService.start(app) }
+            r.onLastRunFinished = { com.mazharansari.axion.work.WorkService.stop(app) }
+        }
+    }
     val storage by lazy { com.mazharansari.axion.linux.StorageRepo(app, this) }   // v0.5.3 Settings → Storage
     val localModels by lazy { com.mazharansari.axion.local.LocalModelStore(app).also { com.mazharansari.axion.local.LocalEngine.libDir = app.applicationInfo.nativeLibraryDir.orEmpty() } }
 
