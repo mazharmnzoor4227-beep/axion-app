@@ -71,6 +71,13 @@
         <service android:name=".work.WorkService" android:exported="false" android:foregroundServiceType="dataSync" />
         <!-- Phase B: "Hey Axion" wake word (microphone FGS; only runs while the owner keeps the Settings toggle on) -->
         <service android:name=".wakeword.WakeWordService" android:exported="false" android:foregroundServiceType="microphone" />
+        <!-- v0.8.4: STOP / CONFIRM buttons of the system phone-control notification -->
+        <receiver android:name=".phone.PhoneActionReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="com.mazharansari.axion.phone.STOP" />
+                <action android:name="com.mazharansari.axion.phone.CONFIRM" />
+            </intent-filter>
+        </receiver>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
