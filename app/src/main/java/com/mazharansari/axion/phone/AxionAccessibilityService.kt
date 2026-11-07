@@ -58,7 +58,7 @@ class AxionAccessibilityService : AccessibilityService() {
         nodes.clear(); val out = ArrayList<PhoneSafety.Node>()
         fun walk(n: AccessibilityNodeInfo?, depth: Int) {
             n ?: return
-            if (out.size >= 150 || depth > 40) return
+            if (out.size >= 300 || depth > 40) return
             if (n.isVisibleToUser) {
                 val text = n.text?.toString().orEmpty(); val desc = n.contentDescription?.toString().orEmpty()
                 val interesting = text.isNotBlank() || desc.isNotBlank() || n.isClickable || n.isEditable || n.isScrollable
@@ -91,13 +91,38 @@ class AxionAccessibilityService : AccessibilityService() {
         val n = nodes[id] ?: return false
         n.refresh(); if (n.isPassword) return false
         n.performAction(AccessibilityNodeInfo.ACTION_FOCUS); n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        // v0.8.6: some editors (WhatsApp's compose box among them) ignore ACTION_CLICK from a
+        // snapshot node and never take focus — a real tap at the field's centre focuses reliably.
+        if (!n.isFocused) {
+            val r = Rect(); n.getBoundsInScreen(r)
+            if (!r.isEmpty) gesture(Path().apply { moveTo(r.exactCenterX(), r.exactCenterY()) }, 60)
+            n.refresh()
+        }
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
-        if (!n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return false
+        var ok = n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        if (!ok || !textLanded(n, text)) {
+            // Fallback: clipboard paste — editors that refuse SET_TEXT usually honour PASTE.
+            ok = pasteInto(n, text)
+        }
+        if (!ok && !textLanded(n, text)) return false
         if (submit) {
             if (Build.VERSION.SDK_INT >= 30) n.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
             else rootInActiveWindow?.let { root -> findSubmitButton(root)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
         }
         return true
+    }
+
+    /** Did the text actually land in the field? (Some editors accept the action and drop the text.) */
+    private fun textLanded(n: AccessibilityNodeInfo, text: String): Boolean {
+        n.refresh()
+        val cur = n.text?.toString().orEmpty()
+        return cur.isNotBlank() && (cur == text || cur.contains(text.take(24)))
+    }
+
+    private fun pasteInto(n: AccessibilityNodeInfo, text: String): Boolean {
+        val cm = getSystemService(CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return false
+        runCatching { cm.setPrimaryClip(android.content.ClipData.newPlainText("axion", text)) }.onFailure { return false }
+        return n.performAction(AccessibilityNodeInfo.ACTION_PASTE)
     }
     private fun findSubmitButton(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         for (w in listOf("search", "go", "enter", "done")) root.findAccessibilityNodeInfosByText(w).firstOrNull { it.isClickable && (it.text ?: it.contentDescription)?.toString()?.equals(w, true) == true }?.let { return it }
