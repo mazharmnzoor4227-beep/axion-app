@@ -335,6 +335,11 @@ fun VoiceScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit = {}) 
                             if (!v) com.mazharansari.axion.assistant.AssistantAnnouncer.stop()
                         }
                     }
+                    // Phase F (v0.8.7): the floating character — the owner's main surface; its window rides the Accessibility service.
+                    ToggleRow(Gk.gem, "Assistant character", if (s.assistantOrb) "On: Axion's character floats on your screen — drag it anywhere; “Hey Axion” brings it to the front; phone control and message popups live on it" else "Off: show Axion's floating character on the home screen (needs Accessibility on)", s.assistantOrb) { v ->
+                        vm.g.settings.update { it.copy(assistantOrb = v) }
+                        com.mazharansari.axion.assistant.AssistantOrb.setEnabled(v)
+                    }
                     var ownCall by remember { mutableStateOf(VoicePrefs.callOwnVoice(ctx)) }
                     ToggleRow(Gk.phone, "Use my chosen voice in calls (a bit slower)", if (ownCall) "On: Gemini Live listens, ${VoiceCatalog.byId(active).name} speaks (≈1 s slower)" else "Off: fast live call in a Gemini voice (${VoiceCatalog.geminiTwin(VoiceCatalog.byId(active)).name})", ownCall) { v ->
                         ownCall = v; VoicePrefs.setCallOwnVoice(ctx, v)
