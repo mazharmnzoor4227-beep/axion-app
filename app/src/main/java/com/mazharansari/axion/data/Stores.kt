@@ -34,6 +34,8 @@ data class AppSettings(
     val toolSwitches: Map<String, Boolean> = emptyMap(),
     /** v0.6 Phone control: the user read the permission screen and agreed. Without it no phone tool ever runs. */
     val phoneConsent: Boolean = false,
+    /** Phase B: "Hey Axion" wake word. Default OFF — the microphone foreground service runs only while this is on. */
+    val wakeWordEnabled: Boolean = false,
     val pasteAsFile: String = "Always ask",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,
