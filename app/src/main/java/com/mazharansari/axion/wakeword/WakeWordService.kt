@@ -109,7 +109,11 @@ class WakeWordService : Service(), RecognitionListener {
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
                     val tmp = File(cacheDir, "vosk-model.zip")
-                    URL(MODEL_URL).openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    // v0.8.0: a single connection is very slow on some networks (the same crawl
+                    // the app update had) — fetch over parallel ranged connections when the
+                    // host allows it, else the plain stream.
+                    val fetched = runCatching { com.mazharansari.axion.llm.ParallelFetch.fetch(com.mazharansari.axion.llm.Http.download, MODEL_URL, tmp) }.getOrDefault(false)
+                    if (!fetched) URL(MODEL_URL).openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
                     val dest = modelDir()
                     dest.deleteRecursively()
                     dest.mkdirs()
