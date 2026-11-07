@@ -470,6 +470,7 @@ private fun DrawerContent(vm: ChatViewModel, onClose: () -> Unit, onOpen: (Strin
     var searching by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<ConversationMeta?>(null) }
     var renaming by remember { mutableStateOf<ConversationMeta?>(null) }
+    val activeRuns by vm.g.runs.active.collectAsState()   // v0.8.0: chats still working in the background get a "Working" mark
     var collapsed by remember { mutableStateOf(false) }
     val filtered = remember(index, q) { index.filter { q.isBlank() || it.title.contains(q, true) || it.preview.contains(q, true) } }
     val pinned = filtered.filter { it.pinned }; val rest = filtered.filterNot { it.pinned }
@@ -506,10 +507,10 @@ private fun DrawerContent(vm: ChatViewModel, onClose: () -> Unit, onOpen: (Strin
             }
             if (pinned.isNotEmpty()) {
                 item(key = "h_pinned") { DrawerHeader("Pinned", null) {} }
-                items(pinned, key = { "p" + it.id }) { c -> ConvRow(c, c.id == vm.conversationId, { onOpen(c.id) }, { menuFor = c }) }
+                items(pinned, key = { "p" + it.id }) { c -> ConvRow(c, c.id == vm.conversationId, activeRuns.any { it.ownerId == c.id }, { onOpen(c.id) }, { menuFor = c }) }
             }
             item(key = "h_conv") { DrawerHeader("Conversations", collapsed) { collapsed = !collapsed } }
-            if (!collapsed) items(rest, key = { it.id }) { c -> ConvRow(c, c.id == vm.conversationId, { onOpen(c.id) }, { menuFor = c }) }
+            if (!collapsed) items(rest, key = { it.id }) { c -> ConvRow(c, c.id == vm.conversationId, activeRuns.any { it.ownerId == c.id }, { onOpen(c.id) }, { menuFor = c }) }
             if (index.isEmpty()) item { Text("Your conversations will appear here", style = Type.small.copy(fontSize = 15.sp), color = p.text3, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) }
         }
         // bottom bar over a fade: Search pill · settings · new chat
@@ -572,13 +573,15 @@ private fun DrawerHeader(label: String, collapsed: Boolean?, onToggle: () -> Uni
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ConvRow(c: ConversationMeta, selected: Boolean, onOpen: () -> Unit, onMenu: () -> Unit) {
+private fun ConvRow(c: ConversationMeta, selected: Boolean, working: Boolean, onOpen: () -> Unit, onMenu: () -> Unit) {
     val p = P
     Row(Modifier.fillMaxWidth().padding(horizontal = 9.dp).clip(RoundedCornerShape(12.dp)).background(if (selected) p.card else Color.Transparent)
         .combinedClickable(onClick = onOpen, onLongClick = onMenu).padding(start = 13.dp, end = 4.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(c.title, style = Type.body.copy(fontSize = 17.sp, lineHeight = 22.sp), color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(dateLabel(c.updatedAt), style = Type.small.copy(fontSize = 14.sp), color = p.text2, modifier = Modifier.padding(top = 2.dp))
+            // v0.8.0 (Phase C): this chat's turn is still running in the background.
+            if (working) Text("Working", style = Type.tiny.copy(fontWeight = FontWeight.SemiBold), color = Color(0xFF3FB950), modifier = Modifier.padding(top = 2.dp))
         }
         IconTap(Gk.more, "More", 18.dp, p.text2, 40.dp, onMenu)
     }
