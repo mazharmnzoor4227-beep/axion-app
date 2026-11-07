@@ -10,8 +10,14 @@ import androidx.lifecycle.viewModelScope
 import com.mazharansari.axion.AxionApp
 import com.mazharansari.axion.agent.*
 import com.mazharansari.axion.data.*
+import com.mazharansari.axion.livecall.ApiKeyCredential
+import com.mazharansari.axion.livecall.LiveCallController
+import com.mazharansari.axion.livecall.LiveCallUiState
+import com.mazharansari.axion.livecall.LiveToolBridge
 import com.mazharansari.axion.llm.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.util.UUID
 
@@ -757,6 +763,53 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
          */
         fun <T> quickOrder(list: List<T>, model: (T) -> String): List<T> =
             list.sortedBy { if (com.mazharansari.axion.agent.IntentGate.isReasoningModel(model(it))) 1 else 0 }
+    }
+
+    // ---- v0.8.3 Floating call (owner, 2026-11-07): the Gemini Live call lives HERE, at activity
+    // scope, not inside the call screen — leaving the call screen used to hang up, but he wants to
+    // keep talking while he works in the chat. The call screen is now only a view of this call;
+    // AppRoot floats a small draggable orb over the other screens while a call is held here.
+    var liveCall: LiveCallController? = null
+        private set
+    private val _liveCallActive = MutableStateFlow(false)
+    val liveCallActive: StateFlow<Boolean> = _liveCallActive
+    private var liveCallPhoneArmed = false
+
+    fun startLiveCall(ctx: android.content.Context, creds: List<ApiKeyCredential>, voiceName: String): LiveCallController {
+        liveCall?.let { return it }
+        val settings = g.settings.state.value
+        val includePhone = settings.phoneConsent && com.mazharansari.axion.agent.ToolCatalog.isEnabled("phone_screen", settings.toolSwitches) &&
+            com.mazharansari.axion.phone.PhoneController.serviceUp.value
+        val bridge = LiveToolBridge.build(g.workspace, g.skills, settings.toolSwitches, includePhone)
+        val controller = LiveCallController(
+            ctx, credentials = creds, autoSwitch = true, restingKeyIds = emptySet(), voiceName = voiceName,
+            onTurn = { u, a -> if (!u.isNullOrBlank() || !a.isNullOrBlank()) appendCallTurn(u.orEmpty(), a.orEmpty()) },
+            onSystemLine = {}, onKeyExhausted = { _, _ -> }, onKeyActivated = {},
+            toolBridge = bridge,
+            contextBlock = com.mazharansari.axion.livecall.CallContext.build(messages),
+        )
+        liveCallPhoneArmed = includePhone && com.mazharansari.axion.phone.PhoneController.beginRun()
+        controller.start()
+        liveCall = controller
+        _liveCallActive.value = true
+        // However the call ends on its own (the end_call tool, a hang-up from the screen), the
+        // holder lets go: the phone run ends and the floating orb goes away.
+        viewModelScope.launch {
+            controller.uiState.collect { st -> if (st.phase == LiveCallUiState.Phase.ENDED) clearLiveCall() }
+        }
+        return controller
+    }
+
+    /** Hang up from anywhere (the call screen's End, the floating orb's badge). */
+    fun endLiveCall() {
+        liveCall?.stop()
+        clearLiveCall()
+    }
+
+    private fun clearLiveCall() {
+        if (liveCallPhoneArmed) { runCatching { com.mazharansari.axion.phone.PhoneController.endRun() }; liveCallPhoneArmed = false }
+        liveCall = null
+        _liveCallActive.value = false
     }
 
     /** Saves a spoken call turn into the open chat, like a typed exchange (Kodex does the same). */
