@@ -1,5 +1,6 @@
 package com.mazharansari.axion.wakeword
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,9 +8,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import com.mazharansari.axion.MainActivity
 import java.io.File
 import java.net.URL
@@ -50,6 +54,7 @@ import org.vosk.android.StorageService
 class WakeWordService : Service(), RecognitionListener {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val retryHandler = Handler(Looper.getMainLooper())
     private var model: Model? = null
     private var speech: SpeechService? = null
     @Volatile private var preparing = false
@@ -70,6 +75,7 @@ class WakeWordService : Service(), RecognitionListener {
 
     override fun onDestroy() {
         stopListening()
+        retryHandler.removeCallbacksAndMessages(null)
         scope.cancel()
         running = false
         super.onDestroy()
@@ -82,6 +88,12 @@ class WakeWordService : Service(), RecognitionListener {
 
     private fun ensureListening() {
         if (speech != null) return
+        // v0.8.1: without the microphone permission the recognizer dies silently (v0.7.2's
+        // onError swallowed it) while the notification kept claiming "Listening" — say so honestly.
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            startForegroundWith("Microphone permission needed — open Axion to allow it")
+            return
+        }
         if (!modelReady()) {
             downloadModel()
             return
@@ -141,7 +153,12 @@ class WakeWordService : Service(), RecognitionListener {
                 }.getOrDefault(false)
             }
             preparing = false
-            if (ok) ensureListening() else startForegroundWith("Voice model download failed — will retry")
+            if (ok) ensureListening() else {
+                startForegroundWith("Voice model download failed — retrying")
+                // v0.8.1: the retry is real now — v0.7.2 said "will retry" but nothing ever did.
+                retryHandler.removeCallbacksAndMessages(null)
+                retryHandler.postDelayed({ downloadModel() }, 60_000)
+            }
         }
     }
 
@@ -154,19 +171,30 @@ class WakeWordService : Service(), RecognitionListener {
     // ---- RecognitionListener ---------------------------------------------------------------
 
     override fun onPartialResult(hypothesis: String?) {
-        if (hypothesis != null && WakePhraseMatcher.isWakePhrase(extractText(hypothesis))) onWake()
+        // v0.8.1 BUG FIX: partial hypotheses carry the phrase in "partial", not "text" — v0.7.2
+        // read "text" for every callback, so live partial wakes NEVER matched and only a paused,
+        // finalized utterance could ever trigger. That is the main reason "Hey Axion" felt dead.
+        if (hypothesis != null && WakePhraseMatcher.isWakePhrase(extractField(hypothesis, "partial"))) onWake()
     }
 
     override fun onResult(hypothesis: String?) {
-        if (hypothesis != null && WakePhraseMatcher.isWakePhrase(extractText(hypothesis))) onWake()
+        if (hypothesis != null && WakePhraseMatcher.isWakePhrase(extractField(hypothesis, "text"))) onWake()
     }
 
-    override fun onFinalResult(hypothesis: String?) {}
-    override fun onError(exception: Exception?) {}
+    override fun onFinalResult(hypothesis: String?) {
+        if (hypothesis != null && WakePhraseMatcher.isWakePhrase(extractField(hypothesis, "text"))) onWake()
+    }
+
+    override fun onError(exception: Exception?) {
+        // v0.8.1: never die silently under a "Listening" notification — stop and say what happened.
+        stopListening()
+        startForegroundWith("Wake word stopped — reopen Axion to restart it")
+    }
+
     override fun onTimeout() {}
 
-    private fun extractText(json: String): String =
-        runCatching { org.json.JSONObject(json).optString("text") }.getOrDefault("")
+    private fun extractField(json: String, field: String): String =
+        runCatching { org.json.JSONObject(json).optString(field) }.getOrDefault("")
 
     private fun onWake() {
         stopListening()
@@ -182,8 +210,13 @@ class WakeWordService : Service(), RecognitionListener {
 
     private fun startForegroundWith(text: String) {
         val n = buildNotification(text)
-        if (Build.VERSION.SDK_INT >= 29) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        else startForeground(ID, n)
+        // v0.8.1: a sticky restart in the background can be refused the microphone type on
+        // Android 14+ — never let that refusal crash the process; fall back, then give up cleanly.
+        val typed = runCatching {
+            if (Build.VERSION.SDK_INT >= 29) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            else startForeground(ID, n)
+        }.isSuccess
+        if (!typed && runCatching { startForeground(ID, n) }.isFailure) stopSelf()
     }
 
     private fun buildNotification(text: String): Notification {
