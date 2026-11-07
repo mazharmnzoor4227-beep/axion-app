@@ -36,6 +36,8 @@ data class AppSettings(
     val phoneConsent: Boolean = false,
     /** Phase B: "Hey Axion" wake word. Default OFF — the microphone foreground service runs only while this is on. */
     val wakeWordEnabled: Boolean = false,
+    /** Phase F (v0.8.5): the assistant reads new message notifications aloud. Default OFF; also needs the system's Notification access grant. */
+    val assistantAnnounce: Boolean = false,
     val pasteAsFile: String = "Always ask",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,
