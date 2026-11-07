@@ -29,11 +29,12 @@ class AxionAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this; overlay = PhoneOverlay(this); PhoneController.attach(this, overlay)
+        com.mazharansari.axion.assistant.AssistantOrb.attach(this)   // v0.8.7: the floating character rides this service's window
     }
     override fun onUnbind(intent: Intent?): Boolean {
-        PhoneController.stop("The Accessibility service was turned off"); PhoneController.detach(); instance = null; return super.onUnbind(intent)
+        PhoneController.stop("The Accessibility service was turned off"); PhoneController.detach(); com.mazharansari.axion.assistant.AssistantOrb.detach(); instance = null; return super.onUnbind(intent)
     }
-    override fun onDestroy() { PhoneController.detach(); instance = null; super.onDestroy() }
+    override fun onDestroy() { PhoneController.detach(); com.mazharansari.axion.assistant.AssistantOrb.detach(); instance = null; super.onDestroy() }
     override fun onInterrupt() {}
 
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
