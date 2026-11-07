@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,7 +18,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,6 +46,7 @@ import com.mazharansari.axion.voice.AxVoice
 import com.mazharansari.axion.voice.VoiceFamily
 import com.mazharansari.axion.voice.VoiceCatalog
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 /**
  * Live call (v0.3) — two real modes, picked with the chip at the top:
@@ -221,30 +225,11 @@ private fun ColumnScope.SameVoiceCallBody(vm: ChatViewModel, voiceLabel: String,
 private fun ColumnScope.GeminiCall(vm: ChatViewModel, creds: List<ApiKeyCredential>, axVoice: AxVoice, onVoice: () -> Unit, back: () -> Unit) {
     val voice = axVoice.engineVoice
     val ctx = LocalContext.current
-    // v0.7.0: the call gets the same hands as chat — web research always (when switched on), phone control only
-    // with the owner's consent + the Tools-library switch + the accessibility service up, and end_call so
-    // "Axion ab tum jao" hangs up. The phone run lives exactly as long as the call (STOP overlay included).
-    val settings = vm.g.settings.state.value
-    val includePhone = settings.phoneConsent && com.mazharansari.axion.agent.ToolCatalog.isEnabled("phone_screen", settings.toolSwitches) &&
-        com.mazharansari.axion.phone.PhoneController.serviceUp.value
-    val bridge = remember { LiveToolBridge.build(vm.g.workspace, vm.g.skills, settings.toolSwitches, includePhone) }
-    // v0.8.2: seed the call with its own conversation (typed turns + earlier call turns) so a
-    // reconnected call continues instead of starting from a blank mind (owner, 2026-11-07).
-    val callContext = remember { com.mazharansari.axion.livecall.CallContext.build(vm.messages) }
-    val controller = remember {
-        LiveCallController(
-            ctx, credentials = creds, autoSwitch = true, restingKeyIds = emptySet(), voiceName = voice,
-            onTurn = { u, a -> if (!u.isNullOrBlank() || !a.isNullOrBlank()) vm.appendCallTurn(u.orEmpty(), a.orEmpty()) },
-            onSystemLine = {}, onKeyExhausted = { _, _ -> }, onKeyActivated = {},
-            toolBridge = bridge,
-            contextBlock = callContext,
-        )
-    }
-    DisposableEffect(controller) {
-        val phoneArmed = includePhone && com.mazharansari.axion.phone.PhoneController.beginRun()
-        controller.start()
-        onDispose { controller.stop(); if (phoneArmed) com.mazharansari.axion.phone.PhoneController.endRun() }
-    }
+    // v0.8.3: the call itself lives in the view model (ChatViewModel.startLiveCall — tools, phone
+    // arming and the v0.8.2 conversation seeding all happen there). This screen is only a view of
+    // it, so going back now MINIMIZES the call (AppRoot floats its orb) instead of hanging up;
+    // the End button below is the real hang-up.
+    val controller = remember { vm.startLiveCall(ctx, creds, voice) }
     val st by controller.uiState.collectAsState()
     var level by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(controller) { while (true) { delay(33); level += (controller.orbLevel() - level) * 0.3f } }
@@ -265,7 +250,7 @@ private fun ColumnScope.GeminiCall(vm: ChatViewModel, creds: List<ApiKeyCredenti
         sub = "$voice · ${CallMode.NATIVE.sub}", onSub = onVoice,
         // v0.4: a live call shows no transcribe/thinking steps while you talk — the words land in the chat afterwards.
         user = "", reply = "", status = st.statusLine, error = st.statusIsError,
-        muted = st.muted, onOrb = {}, onMute = { controller.setMuted(!st.muted) }, onEnd = { controller.stop(); back() },
+        muted = st.muted, onOrb = {}, onMute = { controller.setMuted(!st.muted) }, onEnd = { vm.endLiveCall(); back() },
         speaker = st.speaker, onSpeaker = { controller.setSpeaker(!st.speaker) }, boost = st.boost, onBoost = { controller.setBoost(!st.boost) },
     )
     // v0.5.3: hardware volume keys change the call's volume while the call screen is open.
@@ -317,5 +302,47 @@ private fun CallChip(label: String, icon: Int, on: Boolean, onClick: () -> Unit)
         GkIcon(icon, null, 18.dp, if (on) p.bg else p.text)
         Spacer(Modifier.width(8.dp))
         Text(label, style = Type.small.copy(fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium), color = if (on) p.bg else p.text)
+    }
+}
+
+/**
+ * v0.8.3: the floating call orb AppRoot shows over every other screen while a Live call is held
+ * by the view model and the call screen is not open (the owner asked to keep talking while he
+ * works in the chat). Drag it anywhere; tap it to return to the full call; the red badge hangs up.
+ */
+@Composable
+fun FloatingCallOrb(vm: ChatViewModel, onOpen: () -> Unit) {
+    val controller = vm.liveCall ?: return
+    val st by controller.uiState.collectAsState()
+    var level by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(controller) { while (true) { delay(33); level += (controller.orbLevel() - level) * 0.3f } }
+    var ox by remember { mutableFloatStateOf(0f) }
+    var oy by remember { mutableFloatStateOf(0f) }
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 110.dp)
+                .offset { IntOffset(ox.roundToInt(), oy.roundToInt()) }
+                .size(68.dp)
+        ) {
+            Box(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(50)).background(P.surface2)
+                    .pointerInput(controller) {
+                        detectDragGestures { change, drag -> change.consume(); ox += drag.x; oy += drag.y }
+                    }
+                    .clickable(remember { MutableInteractionSource() }, null) { onOpen() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Orb(54.dp, level, when (st.phase) {
+                    LiveCallUiState.Phase.LISTENING -> OrbMode.Listening
+                    LiveCallUiState.Phase.SPEAKING -> OrbMode.Composing
+                    else -> OrbMode.Frozen
+                })
+            }
+            Box(
+                Modifier.align(Alignment.TopEnd).size(24.dp).clip(RoundedCornerShape(50)).background(Color(0xFFE5252A))
+                    .clickable(remember { MutableInteractionSource() }, null) { vm.endLiveCall() },
+                contentAlignment = Alignment.Center,
+            ) { Text("✕", color = Color.White, fontSize = 12.sp) }
+        }
     }
 }
