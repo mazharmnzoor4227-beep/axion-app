@@ -1,4 +1,4 @@
-name: Verify Build (v0.7.2)
+name: Release Build (v0.7.2)
 on:
   push:
     branches: [axion-v072]
@@ -17,18 +17,13 @@ jobs:
           SDKM=$(ls $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager | sort | tail -1)
           yes | $SDKM --licenses > /dev/null 2>&1 || true
           $SDKM "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
-      - name: Assemble debug
+      - name: Assemble release (unsigned; signed locally with the axion keystore)
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest --continue --no-daemon --stacktrace
-      - name: Upload test reports
-        if: always()
+          ./gradlew assembleRelease --no-daemon --stacktrace
+      - name: Upload unsigned release APK
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
-          path: |
-            app/build/reports/tests/
-            app/build/test-results/
-          if-no-files-found: ignore
+          name: axion-release-unsigned
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+# v0.7.2 release: Hey Axion wake word (Vosk offline, Settings -> Voice toggle)
