@@ -35,6 +35,7 @@ import com.mazharansari.axion.wakeword.WakeWordService
 class PhoneOverlay(private val svc: AccessibilityService) {
     private val main = Handler(Looper.getMainLooper())
     private var notifyMode = false
+    private var orbMode = false
     private var confirmAlerted = false
     private var root: LinearLayout? = null
     private var card: LinearLayout? = null
@@ -85,7 +86,13 @@ class PhoneOverlay(private val svc: AccessibilityService) {
     private fun cardBg() = GradientDrawable().apply { setColor(Color.parseColor("#F2121212")); cornerRadius = dp(18).toFloat(); setStroke(dp(1), Color.parseColor("#44FFFFFF")) }
 
     fun show() = main.post {
-        if (root != null || notifyMode) return@post
+        if (root != null || notifyMode || orbMode) return@post
+        // v0.8.7: the owner's chosen surface is the floating character — it carries the run first.
+        if (com.mazharansari.axion.assistant.AssistantOrb.runShow()) {
+            orbMode = true
+            com.mazharansari.axion.assistant.AssistantOrb.runStatus(listOf("Starting — tap STOP any time"), null)
+            return@post
+        }
         if (PhoneControlNotify.available(svc)) {
             notifyMode = true
             confirmAlerted = false
@@ -215,6 +222,10 @@ class PhoneOverlay(private val svc: AccessibilityService) {
     }
 
     fun update(lines: List<String>, confirmLabel: String? = null) = main.post {
+        if (orbMode) {
+            com.mazharansari.axion.assistant.AssistantOrb.runStatus(lines, confirmLabel)
+            return@post
+        }
         if (notifyMode) {
             // A waiting CONFIRM re-alerts once (heads-up) so it is not missed in the shade.
             val alert = confirmLabel != null && !confirmAlerted
@@ -234,6 +245,11 @@ class PhoneOverlay(private val svc: AccessibilityService) {
     }
 
     fun hide() = main.post {
+        if (orbMode) {
+            orbMode = false
+            com.mazharansari.axion.assistant.AssistantOrb.runHide()
+            return@post
+        }
         if (notifyMode) {
             notifyMode = false
             confirmAlerted = false
