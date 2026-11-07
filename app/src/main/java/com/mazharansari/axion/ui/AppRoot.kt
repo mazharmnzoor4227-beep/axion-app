@@ -97,6 +97,12 @@ fun AppRoot(vm: ChatViewModel) {
                         Route.Storage -> StorageScreen(vm, back, vm.debugStorage?.first, vm.debugStorage?.second)
                     } }
                 }
+                // v0.8.3: while a Live call is held by the view model and the call screen is not
+                // open, its orb floats over whatever screen he is working on (floating call).
+                val callActive by vm.liveCallActive.collectAsState()
+                if (callActive && stack.last() != Route.VoiceCall) {
+                    com.mazharansari.axion.ui.call.FloatingCallOrb(vm, onOpen = { nav(Route.VoiceCall) })
+                }
             }
         }
         } }
