@@ -106,9 +106,9 @@ object AssistantOrb {
         }
     }
 
-    fun detach(s: AccessibilityService) {
+    fun detach() {
         main.post {
-            if (svc === s) { teardown(); svc = null }
+            teardown(); svc = null
         }
     }
 
@@ -199,34 +199,29 @@ object AssistantOrb {
 
     // ------------------------------------------------------------------ run surface (PhoneOverlay)
 
-    fun runShow(lines: List<String>, confirm: String?): Boolean {
+    /** PhoneOverlay's contract (unchanged since v0.8.7): can the character carry this run? */
+    fun runShow(): Boolean {
         if (!enabledWanted || svc == null) return false
-        var ok = false
         main.post {
             if (svc == null) return@post
             acquire("run")
             stopOn = true
-            confirmLabel = confirm
-            bubbleText = lines.lastOrNull()
-            // A blocked/stopped line flashes the angry face, like being scolded mid-work.
-            if (lines.any { it.contains("✋") }) showEmotion(Emotion.ANGRY, 1600)
             refreshSurface()
-            ok = root != null
         }
-        return ok || svc != null
+        return true
     }
 
-    fun runUpdate(lines: List<String>, confirm: String?): Boolean {
-        if (root == null) return false
+    fun runStatus(lines: List<String>, confirmLabel: String?) {
         main.post {
             if ("run" !in holders) return@post
-            confirmLabel = confirm
+            stopOn = true
+            this.confirmLabel = confirmLabel
             bubbleText = lines.lastOrNull()
+            // A blocked/stopped line flashes the angry face, like being scolded mid-work.
             if (lines.any { it.contains("✋") }) showEmotion(Emotion.ANGRY, 1600)
             else if (System.currentTimeMillis() >= overrideUntil) setEmotion(baseEmotion())
             refreshSurface()
         }
-        return true
     }
 
     fun runHide() {
