@@ -812,6 +812,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         liveCall = null
         _liveCallActive.value = false
         com.mazharansari.axion.assistant.AssistantOrb.callActive(false)   // v0.8.8: the call is over — the character goes too
+    }
 
     /** Saves a spoken call turn into the open chat, like a typed exchange (Kodex does the same). */
     fun appendCallTurn(userText: String, assistantText: String) {
