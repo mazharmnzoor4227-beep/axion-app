@@ -1,41 +1,22 @@
 package com.mazharansari.axion.assistant
 
 import android.content.Context
-import android.speech.tts.TextToSpeech
-import java.util.Locale
+import com.mazharansari.axion.voice.ReadAloudPlayer
 
 /**
- * Phase F (v0.8.5): speaks assistant announcements with the phone's own TTS engine (the same
- * Speech Services voices the Voice Library uses). Best-effort by design: if no engine is ready
- * the announcement is simply skipped — a notification must never crash or block on speech.
+ * Phase F announcements, v0.8.9 (owner's word, 2026-11-08): announcements must speak in the
+ * NATURAL voice — the Gemini Live-style voice — not the phone's flat default TTS. So this no
+ * longer uses the system TTS engine at all: it speaks through the app's own read-aloud player,
+ * which uses the voice the owner picked in the Voice Library (a Gemini voice when his Gemini
+ * key is connected — the same natural voices the Live call uses; otherwise the best on-device
+ * voice). One shared player also means an announcement never talks over a chat read-aloud.
  */
 object AssistantAnnouncer {
-    @Volatile private var tts: TextToSpeech? = null
-    @Volatile private var ready = false
-    private val pending = ArrayDeque<String>()
-
-    @Synchronized
     fun speak(ctx: Context, line: String) {
-        val engine = tts
-        if (engine != null) {
-            if (ready) engine.speak(line, TextToSpeech.QUEUE_ADD, null, "axion-notify")
-            return
-        }
-        pending.addLast(line)
-        tts = TextToSpeech(ctx.applicationContext) { status ->
-            ready = status == TextToSpeech.SUCCESS
-            if (ready) {
-                runCatching { tts?.setLanguage(Locale.getDefault()) }
-                synchronized(AssistantAnnouncer) {
-                    while (pending.isNotEmpty()) tts?.speak(pending.removeFirst(), TextToSpeech.QUEUE_ADD, null, "axion-notify")
-                }
-            } else {
-                synchronized(AssistantAnnouncer) { pending.clear() }
-            }
-        }
+        runCatching { ReadAloudPlayer.speak(ctx.applicationContext, "axion-announce", line) }
     }
 
     fun stop() {
-        runCatching { tts?.stop() }
+        runCatching { ReadAloudPlayer.stop() }
     }
 }
