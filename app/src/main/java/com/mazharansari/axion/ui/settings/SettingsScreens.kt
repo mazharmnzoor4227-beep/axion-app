@@ -336,7 +336,7 @@ fun VoiceScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit = {}) 
                         }
                     }
                     // Phase F (v0.8.7): the floating character — the owner's main surface; its window rides the Accessibility service.
-                    ToggleRow(Gk.gem, "Assistant character", if (s.assistantOrb) "On: Axion's character floats on your screen — drag it anywhere; “Hey Axion” brings it to the front; phone control and message popups live on it" else "Off: show Axion's floating character on the home screen (needs Accessibility on)", s.assistantOrb) { v ->
+                    ToggleRow(Gk.gem, "Assistant character", if (s.assistantOrb) "On: appears when you call “Hey Axion”, while a call or phone work runs, and briefly for new messages — never sits on your screen otherwise (needs Accessibility on)" else "Off: Axion's character never appears", s.assistantOrb) { v ->
                         vm.g.settings.update { it.copy(assistantOrb = v) }
                         com.mazharansari.axion.assistant.AssistantOrb.setEnabled(v)
                     }
