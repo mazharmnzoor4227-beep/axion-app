@@ -792,6 +792,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         controller.start()
         liveCall = controller
         _liveCallActive.value = true
+        com.mazharansari.axion.assistant.AssistantOrb.callActive(true)   // v0.8.8: the character stays while a call is held
         // However the call ends on its own (the end_call tool, a hang-up from the screen), the
         // holder lets go: the phone run ends and the floating orb goes away.
         viewModelScope.launch {
@@ -810,7 +811,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (liveCallPhoneArmed) { runCatching { com.mazharansari.axion.phone.PhoneController.endRun() }; liveCallPhoneArmed = false }
         liveCall = null
         _liveCallActive.value = false
-    }
+        com.mazharansari.axion.assistant.AssistantOrb.callActive(false)   // v0.8.8: the call is over — the character goes too
 
     /** Saves a spoken call turn into the open chat, like a typed exchange (Kodex does the same). */
     fun appendCallTurn(userText: String, assistantText: String) {
