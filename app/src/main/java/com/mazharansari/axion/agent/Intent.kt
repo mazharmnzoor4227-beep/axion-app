@@ -102,6 +102,8 @@ object IntentGate {
         // v0.10: memory is conversational — "ye yaad rakhna", "mera naam … hai", "last time hum ne kya decide kiya tha"
         // must work in plain chat, not only in ACTION turns. Skill writing stays ACTION-only (creating things).
         "memory_add", "memory_replace", "memory_remove", "memory_read", "session_search",
+        // v0.11: deep research is a chat request too ("is par research karke batao") — not just an ACTION verb.
+        "deep_research",
     )
 
 

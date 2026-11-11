@@ -456,7 +456,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         // Auto: short chat goes to the fast models first (a greeting should never wait on a big reasoning model).
         val runMode = if (mode == Mode.AUTO && intent != com.mazharansari.axion.agent.Intent.ACTION) Mode.FAST else mode
         val sec = section
-        val quick = sec == Section.ASK && com.mazharansari.axion.agent.IntentGate.isSmallTalk(u.text, intent)
+        // v0.11: Research mode (composer toggle) — a research turn is never "quick" small talk.
+        val researchOn = sec == Section.ASK && s.deepResearch
+        val quick = sec == Section.ASK && !researchOn && com.mazharansari.axion.agent.IntentGate.isSmallTalk(u.text, intent)
         val userItem = UserItem(u.text.ifBlank { "Look at the attached file(s)." } + attachmentNote(u.attachments), media(u.attachments))
         val aid = UUID.randomUUID().toString()
         val started = System.currentTimeMillis()
@@ -520,7 +522,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val pid = sess.pid
                 if (sec == Section.BUILD && pid != null) withContext(Dispatchers.Default) { runBuildTurn(pid, u, sink) }
                 else withContext(Dispatchers.Default) {
-                    Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats).run(
+                    Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn).run(
                         history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }) }, sink = sink,
                         profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
                         intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools

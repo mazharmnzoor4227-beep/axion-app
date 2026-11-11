@@ -33,6 +33,12 @@ class ToolContext(
     val memory: com.mazharansari.axion.data.MemoryStore? = null,
     /** v0.10 learning loop: saved conversations, for the session_search tool. */
     val chats: com.mazharansari.axion.data.ConversationStore? = null,
+    /**
+     * v0.11 deep research: one plain prompt → one plain answer from the same models that serve the
+     * chat (the agent wires its attempts in). Null in surfaces with no model behind them (live calls),
+     * where tools must degrade to deterministic behaviour.
+     */
+    val ask: (suspend (prompt: String) -> String)? = null,
     /** Live output for long commands (shown in the open Bash card). Kept LAST: call sites pass it as a trailing lambda. */
     val progress: (String) -> Unit = {},
 )

@@ -55,6 +55,8 @@ class Agent(
     private val memory: com.mazharansari.axion.data.MemoryStore? = null,
     /** v0.10 learning loop: saved conversations, backing the session_search tool. */
     private val conversations: com.mazharansari.axion.data.ConversationStore? = null,
+    /** v0.11: the user switched Deep Research mode on in the composer — factual turns must research, not recall. */
+    private val researchMode: Boolean = false,
 ) {
     companion object {
         fun defaultTools(): List<Tool> = listOf(
@@ -68,7 +70,18 @@ class Agent(
             // v0.10: the learning loop — persistent memory, self-written skills, past-chat search
             MemoryAddTool(), MemoryReplaceTool(), MemoryRemoveTool(), MemoryReadTool(),
             SkillCreateTool(), SkillUpdateTool(), SkillDeleteTool(), SkillViewTool(), SessionSearchTool(),
+            // v0.11: deep research — the iterative search → read → gap → cross-check pipeline
+            DeepResearchTool(),
         )
+
+        /** v0.11: while Research mode is on, the model must investigate instead of answering from memory. */
+        const val RESEARCH_GUIDANCE = """RESEARCH MODE is ON (the user switched it on in the composer):
+- For anything that needs facts — current information, prices, comparisons, "which is better", how something works in the real world, a decision the user is weighing — call deep_research FIRST with the user's topic (depth "deep"; use "standard" only when the user asks for something quick), then present its report in full, keeping the [n] citations and the Sources list.
+- Do not answer a factual question from your own memory alone while this mode is on.
+- Pure conversation — greetings, opinions, thanks, and follow-ups about a report already given — needs no new research."""
+
+        /** One internal model call (research planning / synthesis) may take this long before the next model is tried. */
+        const val ASK_TIMEOUT_MS = 180_000L
 
         /** Hermes-style learning nudge, appended whenever the memory/skill tools are in play. */
         const val LEARNING_GUIDANCE = """LEARNING — you improve between chats, like this:
@@ -98,7 +111,7 @@ class Agent(
         // chat or lookup request gets the web tools (IntentGate.chatTools), so "open the browser and
         // research this" works wherever the user says it. File/command tools still need an ACTION turn.
         val tools = when (intent) {
-            Intent.CHAT -> if (IntentGate.isSmallTalk(user.text, intent)) emptyList() else all.filter { it.spec.name in IntentGate.chatTools }
+            Intent.CHAT -> if (IntentGate.isSmallTalk(user.text, intent) && !researchMode) emptyList() else all.filter { it.spec.name in IntentGate.chatTools }
             Intent.LOOKUP -> all.filter { it.spec.name in IntentGate.chatTools }
             Intent.ACTION -> all
         } + planTools
@@ -111,18 +124,21 @@ class Agent(
         // the learning guidance is added whenever this turn actually has the memory/skill tools.
         val memBlock = memory?.promptBlock().orEmpty()
         val learnBlock = if (memory != null && tools.any { it.spec.name == "memory_add" || it.spec.name == "skill_create" }) "\n\n" + LEARNING_GUIDANCE else ""
+        val researchBlock = if (researchMode && tools.any { it.spec.name == "deep_research" }) "\n\n" + RESEARCH_GUIDANCE else ""
         val sys = systemPrompt(profile, tools, intent) + memBlock + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
-            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock
+            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user
         val answer = StringBuilder()
-        val quick = IntentGate.isSmallTalk(user.text, intent)
+        val quick = !researchMode && IntentGate.isSmallTalk(user.text, intent)
         // v0.5.1: short/simple prompts ask reasoning models to think little (gpt-oss: reasoning_effort "low").
         val effort = if (quick || (intent == Intent.CHAT && user.text.trim().length <= 160)) "low" else null
         var planPhase = wantsPlan && tools.any { it.spec.name == Planner.PLAN_SET }
         var toolsOff = false
         val policy = FaultPolicy()
+        // v0.11: tools that think internally (deep research) get plain completions on this run's own models.
+        val ask: suspend (String) -> String = { prompt -> askOnce(attempts, prompt) }
         repeat(maxRounds) { round ->
             val specs = when { toolsOff -> emptyList(); planPhase -> listOf(Planner.planSetSpec); else -> tools.map { it.spec } }
             val (text, calls) = streamOnce(HistoryCompressor.compressRun(items), specs, attempts, sink, quick, effort)
@@ -130,7 +146,7 @@ class Agent(
             items += AssistantItem(text, calls)
             if (calls.isEmpty()) { answer.append(text); if (planState.active) { planState.finish(ok = !toolsOff, reason = "stopped early"); onPlan() }; return answer.toString() }
             if (text.isNotBlank()) sink.textToThoughts()
-            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations)
+            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations, ask = ask)
             for (call in calls) {
                 val tool = byName[call.name]
                 val args = runCatching { Json.parseToJsonElement(call.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
@@ -149,7 +165,7 @@ class Agent(
                 val step = Step(id = UUID.randomUUID().toString(), kind = label.kind, title = label.title, target = label.target, status = StepStatus.RUNNING, startedAt = System.currentTimeMillis(), detail = detail)
                 sink.step(step)
                 var lastPush = 0L
-                val live = ToolContext(workspace, skills, memory = memory, chats = conversations) { partial ->
+                val live = ToolContext(workspace, skills, memory = memory, chats = conversations, ask = ask) { partial ->
                     val now = System.currentTimeMillis()
                     if (now - lastPush > 250) { lastPush = now; sink.step(step.copy(output = com.mazharansari.axion.security.SecretScanner.scrub(partial))) }
                 }
@@ -176,6 +192,38 @@ class Agent(
         }
         if (planState.active) { planState.finish(ok = false, reason = "step limit"); onPlan() }
         return answer.toString()
+    }
+
+    /**
+     * v0.11: ONE plain completion for a tool that thinks internally (deep-research planning, gap
+     * analysis, synthesis). Tries this run's attempts in order with a per-attempt timeout; a model
+     * that answers only in its reasoning channel has that text used, like streamOnce does.
+     */
+    private suspend fun askOnce(attempts: () -> List<Attempt>, prompt: String): String {
+        val list = attempts()
+        if (list.isEmpty()) throw NoModelException("No AI connector yet. Open Connectors and paste a free API key (Gemini, Groq, OpenRouter…).")
+        var last: Exception? = null
+        for (a in list) {
+            try {
+                val text = StringBuilder(); val reasoning = StringBuilder()
+                val finished = kotlinx.coroutines.withTimeoutOrNull(ASK_TIMEOUT_MS) {
+                    a.client.stream(LlmRequest(a.model, listOf(UserItem(prompt)))).collect { ev ->
+                        when (ev) {
+                            is LlmEvent.Text -> text.append(ev.delta)
+                            is LlmEvent.Reasoning -> reasoning.append(ev.delta)
+                            else -> {}
+                        }
+                    }
+                    true
+                }
+                val out = (if (text.isNotBlank()) text.toString() else reasoning.toString()).trim()
+                if (finished == true && out.isNotEmpty()) return out
+                last = LlmException("${a.model} gave no answer", FailKind.SERVER)
+            } catch (e: CancellationException) { throw e }
+            catch (e: LlmException) { a.onFail(e); last = e }
+            catch (e: Throwable) { last = LlmException(e.message ?: "model call failed", FailKind.SERVER) }
+        }
+        throw last ?: NoModelException("No model answered.")
     }
 
     private class SlowModel(val why: String) : CancellationException(why)

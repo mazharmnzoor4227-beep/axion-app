@@ -344,6 +344,8 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                     onMicCancel = { g.speech.cancel() },
                     onSend = { vm.send() }, onStop = { vm.stop() }, onVoiceCall = { navigate(Route.VoiceCall) },
                     plusOpen = plus, modeOpen = model, onFocus = { vm.prewarm() },
+                    researchOn = if (build) null else settings.deepResearch,
+                    onResearch = { g.settings.update { it.copy(deepResearch = !it.deepResearch) } },
                 )
             }
             // Grok's pull-up indicator, rising from just above the composer as the chat is lifted.

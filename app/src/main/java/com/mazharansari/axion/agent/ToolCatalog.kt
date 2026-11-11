@@ -20,6 +20,8 @@ object ToolCatalog {
     val groups: List<ToolGroup> = listOf(
         ToolGroup("web", "Web search & pages", "Searches the web, opens and reads web pages, and calls web APIs for fresh facts, prices, news and weather.",
             setOf("web_search", "browse_url", "http_request"), refusal = "searching the web or opening pages"),
+        ToolGroup("research", "Deep research", "Investigates a topic properly instead of one quick search: plans sub-questions, searches several angles, reads the best sources in full, follows up on gaps in extra rounds, cross-checks claims across sources and writes a cited report (saved in outputs/research/). Takes minutes, not seconds.",
+            setOf("deep_research"), refusal = "doing deep research"),
         ToolGroup("browser", "Browser", "Axion's own web browser: opens real pages (JavaScript, forms, logins), reads them, clicks, types, scrolls and takes screenshots. Watch or take over in the Browser screen.",
             setOf("browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll", "browser_back", "browser_forward", "browser_reload", "browser_search", "browser_screenshot"),
             refusal = "using the built-in browser"),

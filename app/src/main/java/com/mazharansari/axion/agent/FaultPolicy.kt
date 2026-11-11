@@ -67,6 +67,8 @@ class FaultPolicy(
             "run_command" -> ((args.i("timeout_sec") ?: 60).coerceIn(1, 600) + 40) * 1000L
             "shell_session" -> ((args.i("timeout_sec") ?: 120).coerceIn(1, 600) + 40) * 1000L
             "browser_open", "browser_search" -> 120_000L
+            // v0.11: a research run is minutes of searching + reading by design (its own internal budget stops sooner).
+            "deep_research" -> if (args.s("depth")?.trim()?.lowercase() == "standard") 900_000L else 1_800_000L
             "video_edit" -> 1_700_000L
             "video_probe" -> 120_000L
             "generate_image" -> 150_000L
