@@ -60,7 +60,7 @@ fun LocalModelsScreen(vm: ChatViewModel, back: () -> Unit) {
     Column(Modifier.fillMaxSize().background(p.page2)) {
         ScreenHeader("Local model", back)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
-            HonestBanner("Runs on your phone with no internet. Honest: these small models are much slower and weaker than API models (Gemini, Groq…). Good for quick offline answers and small code snippets, not big projects. The phone gets warm.")
+            HonestBanner("Runs on your phone with no internet. Honest: these small models are much slower and weaker than API models (Gemini, Groq…). Good for quick offline answers and small code snippets, not big projects. The phone gets warm. Local models answer chats only — they do not run tools or agent tasks; switch back to an API model for those.")
             Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 @Composable fun box(label: String, value: String, m: Modifier) = Column(m.clip(RoundedCornerShape(14.dp)).background(p.card).padding(12.dp)) {
                     Text(value, style = Type.row.copy(fontSize = 16.sp), color = p.text); Text(label, style = Type.tiny, color = p.text2)

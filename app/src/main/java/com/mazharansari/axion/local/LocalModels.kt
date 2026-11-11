@@ -34,6 +34,10 @@ object LlamaNative {
 /** Downloadable on-device models (addendum 6). Sizes and SHA-256 are Hugging Face's own (checked 1 Nov 2026). */
 enum class LocalModel(val id: String, val title: String, val family: String, val params: String, val url: String, val bytes: Long, val sha256: String,
                       val minRamGb: Int, val ctx: Int, val blurb: String) {
+    LFM3_1_7B("lfm3-1.7b", "LFM3 1.7B", "Liquid AI", "1.7B · Q4_K_M",
+        "https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/resolve/main/LFM3-1.7B-Q4_K_M.gguf",
+        1_099_627_808, "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4", 4, 8192,
+        "Axion's recommended offline brain (the owner's saved model). Fast chat, summaries, translation and quick answers with no internet — Hindi/Urdu supported, long memory (8k)."),
     QWEN_CODER_1_5B("qwen2.5-coder-1.5b", "Qwen2.5-Coder 1.5B", "Qwen", "1.5B · Q4_K_M",
         "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
         1_117_320_768, "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046", 4, 4096,
