@@ -204,8 +204,6 @@ class V04ScreensTest {
         cap("08_drawer_keyboard_closed"); sc.close()
     }
 
-    @Test fun voiceSettings() { seed(); val sc = route(Route.Voice); cap("09_voice_settings"); sc.close() }
-
     @Test fun callNoKey() {
         val fd = app.filesDir
         File(fd, "settings.json").writeText("""{"userName":"Mazhar Ansari","theme":"dark"}""")

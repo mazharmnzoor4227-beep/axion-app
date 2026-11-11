@@ -22,25 +22,17 @@ fun AppRoot(vm: ChatViewModel) {
     val stack = remember { mutableStateListOf<Route>(Route.Home) }
     val ctx = LocalContext.current
     LaunchedEffect(vm.toast) { vm.toast?.let { Toast.makeText(ctx, it, Toast.LENGTH_SHORT).show(); vm.toast = null } }
-    // v0.5.3: the Axion account (Firebase). Signed out and not "guest" → the sign-in screen comes first, Kodex-style.
-    val auth = remember { com.mazharansari.axion.auth.AuthHub.get(ctx) }
-    val authState by auth.state.collectAsState()
     AxionTheme(settings.theme, settings.textScale) {
         val onboarding = com.mazharansari.axion.ui.auth.Onboarding.enabled
-        // v0.5.3 first run: intro → permissions → sign-in ("Maybe later") → the app, cross-faded.
+        // First run: intro → permissions → the app, cross-faded. No sign-in: the app opens straight in.
         val stage = when {
             onboarding && !settings.introShown -> 0
             onboarding && !settings.permsShown -> 1
-            auth.available && authState is com.mazharansari.axion.auth.AuthState.SignedOut && !settings.guestChosen -> 2
             else -> 3
         }
         Crossfade(targetState = stage, animationSpec = tween(320), label = "firstRun") { st -> when (st) {
         0 -> com.mazharansari.axion.ui.auth.IntroScreen { vm.g.settings.update { it.copy(introShown = true) } }
         1 -> com.mazharansari.axion.ui.auth.PermissionsOnboarding({ vm.g.settings.update { it.copy(permsShown = true) } })
-        2 -> {
-            com.mazharansari.axion.security.SecureScreen()
-            com.mazharansari.axion.ui.auth.SignInScreen(auth, onGuest = { vm.g.settings.update { it.copy(guestChosen = true) } }, onDone = {})
-        }
         else ->
         CompositionLocalProvider(LocalHaptics provides settings.haptics) {
             var goingBack by remember { mutableStateOf(false) }
@@ -67,20 +59,15 @@ fun AppRoot(vm: ChatViewModel) {
                         Route.Home -> HomeScreen(vm, nav)
                         Route.Settings -> SettingsScreen(vm, nav, back)
                         Route.Appearance -> AppearanceScreen(vm, back)
-                        Route.Haptics -> HapticsScreen(vm, back)
                         Route.Language -> LanguageScreen(vm, back)
                         Route.Advanced -> AdvancedScreen(vm, back)
                         Route.Customize -> CustomizeScreen(vm, back)
                         Route.Connectors -> ConnectorsScreen(vm, nav, back)
                         Route.CustomConnector -> CustomConnectorScreen(vm, back)
                         Route.Skills -> SkillsScreen(vm, back)
-                        Route.Voice -> VoiceScreen(vm, back, nav)
                         Route.VoiceCall -> com.mazharansari.axion.ui.call.VoiceCallScreen(vm, back) { nav(Route.Connectors) }
                         Route.Data -> DataScreen(vm, back)
                         Route.About -> AboutScreen(vm, back, nav)
-                        Route.Privacy -> PolicyScreen(PolicyText.privacy, back)
-                        Route.Security -> PolicyScreen(PolicyText.security, back)
-                        Route.Terms -> PolicyScreen(PolicyText.terms, back)
                         Route.Files -> FilesScreen(vm, back)
                         Route.DevTools -> DevToolsScreen(vm, back, vm.debugToolSheet)
                         Route.Antigravity -> AntigravityScreen(vm, back, nav, vm.debugAgyLogin)
@@ -89,11 +76,7 @@ fun AppRoot(vm: ChatViewModel) {
                         Route.LocalModels -> LocalModelsScreen(vm, back)
                         Route.MyServer -> MyServerScreen(vm, back, nav)
                         Route.ServerGuide -> ServerGuideScreen(back)
-                        Route.Account -> com.mazharansari.axion.ui.auth.AccountScreen(auth, back, onSignIn = { nav(Route.SignIn) },
-                            onSignedOut = { stack.clear(); stack.add(Route.Home); vm.g.settings.update { it.copy(guestChosen = false) } })
-                        Route.SignIn -> com.mazharansari.axion.ui.auth.SignInScreen(auth, onGuest = null, onDone = back, onClose = back)
                         Route.ToolsLibrary -> ToolsLibraryScreen(vm, nav, back)
-                        Route.PhoneControl -> PhoneControlScreen(vm, back)
                         Route.Storage -> StorageScreen(vm, back, vm.debugStorage?.first, vm.debugStorage?.second)
                     } }
                 }

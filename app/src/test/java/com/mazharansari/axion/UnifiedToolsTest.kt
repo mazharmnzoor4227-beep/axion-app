@@ -18,7 +18,7 @@ import java.io.File
 /**
  * v0.7.0 unified tools (owner: "ask ho ya build, jo bolun wo ho jaye"): the intent label no longer decides
  * whether Axion CAN act in a chat. Small talk still gets no tools; any real chat or lookup request is
- * offered the web + phone tools (when the phone group is switched on); file/command work still needs ACTION.
+ * offered the web tools; file/command work still needs ACTION.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = AxionApp::class)
@@ -40,8 +40,8 @@ class UnifiedToolsTest {
         override suspend fun run(args: JsonObject, ctx: ToolContext) = ToolOutput("ran $name")
     }
 
-    private val pool = listOf("web_search", "browse_url", "http_request", "phone_screen", "phone_tap", "run_command", "write_file").map { Fake(it) }
-    private val webAndPhone = setOf("web_search", "browse_url", "http_request", "phone_screen", "phone_tap")
+    private val pool = listOf("web_search", "browse_url", "http_request", "run_command", "write_file").map { Fake(it) }
+    private val webOnly = setOf("web_search", "browse_url", "http_request")
 
     private fun offeredTools(text: String, intent: Intent, sw: Map<String, Boolean>): Set<String> {
         val seen = mutableListOf<LlmRequest>()
@@ -58,37 +58,29 @@ class UnifiedToolsTest {
     }
 
     @Test fun smallTalkStillGetsNoTools() {
-        // Even with the phone switched on, a greeting stays a greeting: instant, cheap, tool-free (v0.3 rule).
-        assertEquals(emptySet<String>(), offeredTools("Assalam o alaikum", Intent.CHAT, mapOf("phone" to true)))
-        assertEquals(emptySet<String>(), offeredTools("hello Kya Hal he", Intent.CHAT, mapOf("phone" to true)))
+        // A greeting stays a greeting: instant, cheap, tool-free (v0.3 rule).
+        assertEquals(emptySet<String>(), offeredTools("Assalam o alaikum", Intent.CHAT, emptyMap()))
+        assertEquals(emptySet<String>(), offeredTools("hello Kya Hal he", Intent.CHAT, emptyMap()))
     }
 
-    @Test fun realChatRequestGetsWebAndPhone() {
-        val got = offeredTools("What is the difference between a virus and a bacterium in detail?", Intent.CHAT, mapOf("phone" to true))
-        assertEquals(webAndPhone, got)
+    @Test fun realChatRequestGetsWeb() {
+        val got = offeredTools("What is the difference between a virus and a bacterium in detail?", Intent.CHAT, emptyMap())
+        assertEquals(webOnly, got)
     }
 
-    @Test fun lookupGetsWebAndPhoneToo() {
-        // The owner's exact case: "browser kholo, research karke batao" classifies as a lookup — the phone must be there.
-        val got = offeredTools("aaj karachi ka mausam kaisa hai", Intent.LOOKUP, mapOf("phone" to true))
-        assertEquals(webAndPhone, got)
-    }
-
-    @Test fun phoneSwitchedOffStaysOutOfChatAndLookup() {
-        // The Tools library switch (and with it the consent) is the real gate — off means off in every intent.
-        val webOnly = setOf("web_search", "browse_url", "http_request")
-        assertEquals(webOnly, offeredTools("aaj karachi ka mausam kaisa hai", Intent.LOOKUP, emptyMap()))
-        assertEquals(webOnly, offeredTools("What is the difference between a virus and a bacterium in detail?", Intent.CHAT, emptyMap()))
+    @Test fun lookupGetsWebToo() {
+        val got = offeredTools("aaj karachi ka mausam kaisa hai", Intent.LOOKUP, emptyMap())
+        assertEquals(webOnly, got)
     }
 
     @Test fun actionStillGetsEverything() {
-        val got = offeredTools("make a pdf of this now", Intent.ACTION, mapOf("phone" to true))
+        val got = offeredTools("make a pdf of this now", Intent.ACTION, emptyMap())
         assertEquals(pool.map { it.spec.name }.toSet(), got)
     }
 
-    @Test fun catalogAndGatePhoneListsMatch() {
-        // IntentGate.phoneTools must name exactly the ToolCatalog "phone" group, or a tool would silently vanish from chat.
-        assertEquals(ToolCatalog.groups.first { it.id == "phone" }.tools, IntentGate.phoneTools)
-        assertEquals(IntentGate.lookupTools, ToolCatalog.groups.first { it.id == "web" }.tools)
+    @Test fun catalogAndGateWebListsMatch() {
+        // IntentGate's web list must name exactly the ToolCatalog "web" group, or a tool would silently vanish from chat.
+        assertEquals(ToolCatalog.groups.first { it.id == "web" }.tools, IntentGate.lookupTools)
+        assertEquals(IntentGate.lookupTools, IntentGate.chatTools)
     }
 }

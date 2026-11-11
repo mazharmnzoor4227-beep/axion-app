@@ -25,7 +25,7 @@ package com.mazharansari.axion.voice
  *    (read Urdu script). With "Smart Urdu" on, a natural voice hands Urdu-script text to the Urdu voice and
  *    Roman Urdu / Hinglish to the Hindi voice of the same gender, so Urdu never comes out in an English accent.
  */
-enum class VoiceFamily { KODEX, NATURAL, GEMINI, ELEVENLABS }
+enum class VoiceFamily { KODEX, NATURAL, GEMINI }
 
 data class AxVoice(
     val id: String,
@@ -76,9 +76,7 @@ object VoiceCatalog {
         AxVoice("gemini:Achird", "Achird", VoiceFamily.GEMINI, "Gemini · any language", "Friendly", "Achird", false),
     )
 
-    val elevenLabs = AxVoice("elevenlabs", "ElevenLabs", VoiceFamily.ELEVENLABS, "Your own key", "Premium · your voice ID")
-
-    val all = kodex + natural + gemini + elevenLabs
+    val all = kodex + natural + gemini
 
     fun byId(id: String?): AxVoice = all.firstOrNull { it.id == id } ?: kodex.first()
 

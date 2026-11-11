@@ -23,7 +23,6 @@ object BrandLogos {
         "deepseek" to R.drawable.brand_deepseek,
         "openai" to R.drawable.brand_openai,
         "anthropic" to R.drawable.brand_anthropic,
-        "elevenlabs" to R.drawable.brand_elevenlabs,
         "github" to R.drawable.brand_github,
         "github-models" to R.drawable.brand_github,
         "antigravity" to R.drawable.brand_antigravity,
@@ -36,7 +35,7 @@ object BrandLogos {
         "github_models" to "github-models", "githubmodels" to "github-models",
         "together-ai" to "together", "togetherai" to "together",
         "claude" to "anthropic", "nvidia-nim" to "nvidia", "nim" to "nvidia",
-        "eleven-labs" to "elevenlabs", "google-antigravity" to "antigravity", "agy" to "antigravity",
+        "google-antigravity" to "antigravity", "agy" to "antigravity",
     )
 
     fun res(id: String): Int? {
