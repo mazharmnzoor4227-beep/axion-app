@@ -81,8 +81,9 @@ class UnifiedToolsTest {
     @Test fun catalogAndGateWebListsMatch() {
         // IntentGate's lookup list must name exactly the ToolCatalog "web" + "browser" (v0.9: the agent's own
         // browser is a lookup tool too) + "learning" (v0.10: memory/session tools are conversational) +
-        // "research" (v0.11: deep research) groups, or a tool would silently vanish from chat.
-        val expected = listOf("web", "browser", "learning", "research")
+        // "research" (v0.11: deep research) + "schedule" (v0.12: scheduling is conversational) groups,
+        // or a tool would silently vanish from chat.
+        val expected = listOf("web", "browser", "learning", "research", "schedule")
             .flatMap { id -> ToolCatalog.groups.first { it.id == id }.tools }.toSet()
         assertEquals(expected, IntentGate.lookupTools)
         assertEquals(IntentGate.lookupTools, IntentGate.chatTools)

@@ -31,8 +31,9 @@ sealed interface Route {
     data object Terminal : Route
     // v0.10 — the learning loop
     data object Memory : Route
-    // v0.12 — remembered approvals
+    // v0.12 — remembered approvals + scheduled tasks
     data object Approvals : Route
+    data object Schedules : Route
 }
 
 /** v0.5.2: routes shown with FLAG_SECURE (a key, token or password can be typed or shown on them). */

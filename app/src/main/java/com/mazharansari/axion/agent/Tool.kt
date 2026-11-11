@@ -33,6 +33,10 @@ class ToolContext(
     val memory: com.mazharansari.axion.data.MemoryStore? = null,
     /** v0.10 learning loop: saved conversations, for the session_search tool. */
     val chats: com.mazharansari.axion.data.ConversationStore? = null,
+    /** v0.12 scheduler: the user's scheduled tasks, for the schedule_* tools (null in surfaces without them). */
+    val schedules: com.mazharansari.axion.data.SchedulesStore? = null,
+    /** v0.12 scheduler: application context, so a tool can arm WorkManager. */
+    val appCtx: android.content.Context? = null,
     /**
      * v0.11 deep research: one plain prompt → one plain answer from the same models that serve the
      * chat (the agent wires its attempts in). Null in surfaces with no model behind them (live calls),

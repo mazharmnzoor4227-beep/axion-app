@@ -104,6 +104,9 @@ object IntentGate {
         "memory_add", "memory_replace", "memory_remove", "memory_read", "session_search",
         // v0.11: deep research is a chat request too ("is par research karke batao") — not just an ACTION verb.
         "deep_research",
+        // v0.12: scheduling is conversational too ("kal 9 baje yaad dilana…", "roz sham ko…") — it must
+        // work in plain chat, not only in ACTION turns.
+        "schedule_create", "schedule_list", "schedule_delete",
     )
 
 

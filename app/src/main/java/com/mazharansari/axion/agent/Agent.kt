@@ -63,6 +63,10 @@ class Agent(
     private val approver: Approver? = null,
     /** v0.12: Long task mode — bigger round/tool budgets and plan-verify-finish guidance. */
     private val longTask: Boolean = false,
+    /** v0.12 scheduler: the user's schedules, handed to the schedule_* tools through the ToolContext. */
+    private val schedules: com.mazharansari.axion.data.SchedulesStore? = null,
+    /** v0.12 scheduler: application context so schedule tools can arm WorkManager. */
+    private val appCtx: android.content.Context? = null,
 ) {
     companion object {
         fun defaultTools(): List<Tool> = listOf(
@@ -78,6 +82,8 @@ class Agent(
             SkillCreateTool(), SkillUpdateTool(), SkillDeleteTool(), SkillViewTool(), SessionSearchTool(),
             // v0.11: deep research — the iterative search → read → gap → cross-check pipeline
             DeepResearchTool(),
+            // v0.12: scheduled tasks — create/list/delete; WorkManager runs them headlessly later
+            ScheduleCreateTool(), ScheduleListTool(), ScheduleDeleteTool(),
         )
 
         /** v0.11: while Research mode is on, the model must investigate instead of answering from memory. */
@@ -162,7 +168,7 @@ class Agent(
             items += AssistantItem(text, calls)
             if (calls.isEmpty()) { answer.append(text); if (planState.active) { planState.finish(ok = !toolsOff, reason = "stopped early"); onPlan() }; return answer.toString() }
             if (text.isNotBlank()) sink.textToThoughts()
-            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations, ask = ask)
+            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask)
             for (call in calls) {
                 val tool = byName[call.name]
                 val args = runCatching { Json.parseToJsonElement(call.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
@@ -206,7 +212,7 @@ class Agent(
                 val step = Step(id = UUID.randomUUID().toString(), kind = label.kind, title = label.title, target = label.target, status = StepStatus.RUNNING, startedAt = System.currentTimeMillis(), detail = detail)
                 sink.step(step)
                 var lastPush = 0L
-                val live = ToolContext(workspace, skills, memory = memory, chats = conversations, ask = ask) { partial ->
+                val live = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask) { partial ->
                     val now = System.currentTimeMillis()
                     if (now - lastPush > 250) { lastPush = now; sink.step(step.copy(output = com.mazharansari.axion.security.SecretScanner.scrub(partial))) }
                 }

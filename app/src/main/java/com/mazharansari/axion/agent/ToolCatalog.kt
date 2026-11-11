@@ -37,6 +37,8 @@ object ToolCatalog {
         ToolGroup("skills", "Skills", "Loads your installed skills, installs new ones from GitHub when you share a link, and lets Axion write and improve its own learned skills.", setOf("load_skill", "install_skills_from_github", "skill_create", "skill_update", "skill_delete", "skill_view"), refusal = "using or installing skills"),
         ToolGroup("learning", "Memory & learning", "Axion's persistent memory: it saves your preferences, facts and lessons and recalls them in future chats, and can search your past conversations. Everything it saves is visible in Settings → Memory.",
             setOf("memory_add", "memory_replace", "memory_remove", "memory_read", "session_search"), refusal = "remembering things or searching past chats"),
+        ToolGroup("schedule", "Scheduled tasks", "Runs a task later on its own — once, daily or weekly. At the set time Axion does the task by itself, saves the result as a new chat and notifies you. Manage them in Settings → Schedules.",
+            setOf("schedule_create", "schedule_list", "schedule_delete"), refusal = "scheduling tasks"),
         ToolGroup("connectors", "Connectors (MCP)", "Uses the tools of connectors you added (Gmail, Notion, GitHub …). Manage connectors in Settings → Connectors.", emptySet(), refusal = "using your connectors"),
     )
     private val byTool: Map<String, ToolGroup> = groups.flatMap { g -> g.tools.map { it to g } }.toMap()

@@ -554,7 +554,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (sec == Section.BUILD && pid != null) withContext(Dispatchers.Default) { runBuildTurn(pid, u, sink) }
                 else withContext(Dispatchers.Default) {
                     Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn,
-                        approvals = g.approvals, approver = approver, longTask = longTaskOn).run(
+                        approvals = g.approvals, approver = approver, longTask = longTaskOn, schedules = g.schedules, appCtx = getApplication()).run(
                         history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }) }, sink = sink,
                         profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
                         intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools
