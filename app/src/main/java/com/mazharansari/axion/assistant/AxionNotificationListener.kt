@@ -10,7 +10,7 @@ import com.mazharansari.axion.AxionApp
  * Notification access in Android settings (a system grant this app cannot give itself).
  * Messaging apps only; Axion's own notifications, ongoing and group-summary posts are skipped.
  * What is heard lands in [NotifyInbox]; whether it is SPOKEN is the owner's Settings toggle
- * (assistantAnnounce, default off). Replying and screen-reading arrive in later Phase F stages.
+ * (assistantAnnounce, default off).
  */
 class AxionNotificationListener : NotificationListenerService() {
 
@@ -42,7 +42,6 @@ class AxionNotificationListener : NotificationListenerService() {
         if (settings.assistantAnnounce) {
             val line = NotifyInbox.spokenLine(label, title, text)
             AssistantAnnouncer.speak(applicationContext, line)
-            AssistantOrb.showMessage(line)   // v0.8.7: the popup comes out of the character
         }
     }
 }

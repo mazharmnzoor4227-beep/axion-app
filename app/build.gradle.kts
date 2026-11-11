@@ -112,7 +112,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.animation:animation")
     implementation("dev.chrisbanes.haze:haze-android:1.1.1")
-    implementation("com.alphacephei:vosk-android:0.3.75")   // Phase B wake word: offline grammar spotting (model downloads separately, not bundled)
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 

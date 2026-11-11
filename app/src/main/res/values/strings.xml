@@ -2,6 +2,4 @@
 <resources>
     <!-- Rename the app here: this one string is the app name everywhere. -->
     <string name="app_name">Axion</string>
-    <string name="phone_service_label">Axion phone control</string>
-    <string name="phone_service_description">Lets Axion read the screen, tap, type and scroll in other apps ONLY while you have asked it to do a task and its red STOP button is showing. Banking, payment and wallet apps are never touched. Turn this off any time.</string>
 </resources>

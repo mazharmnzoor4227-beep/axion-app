@@ -26,8 +26,6 @@ class AxionApp : Application() {
         com.mazharansari.axion.security.SecretScanner.known = { graph.knownSecrets() }
         Thread { runCatching { graph.agy.sealAtRest() }; runCatching { graph.knownSecrets() } }.start()
         com.mazharansari.axion.voice.ReadAloudPlayer.geminiKeys = { graph.geminiKeys() }
-        // Phase B: if the owner left the wake word on, resume listening after a restart/reboot of the process.
-        Thread { runCatching { if (graph.settings.state.value.wakeWordEnabled) com.mazharansari.axion.wakeword.WakeWordService.start(this) } }.start()
     }
 }
 

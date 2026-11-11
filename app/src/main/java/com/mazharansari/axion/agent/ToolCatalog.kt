@@ -30,9 +30,6 @@ object ToolCatalog {
             sensitive = true, refusal = "running commands"),
         ToolGroup("skills", "Skills", "Loads your installed skills and installs new ones from GitHub when you share a link.", setOf("load_skill", "install_skills_from_github"), refusal = "using or installing skills"),
         ToolGroup("connectors", "Connectors (MCP)", "Uses the tools of connectors you added (Gmail, Notion, GitHub …). Manage connectors in Settings → Connectors.", emptySet(), refusal = "using your connectors"),
-        ToolGroup("phone", "Phone control", "Opens apps, taps, types and scrolls on your phone for you, while you watch, with a red STOP button. Never touches banking, payment or wallet apps.",
-            setOf("phone_screen", "phone_open_app", "phone_tap", "phone_type", "phone_scroll", "phone_back", "phone_home", "phone_wait"), defaultOn = false,
-            note = "Also needs the permission screen (Settings → Phone control).", sensitive = true, refusal = "controlling the phone"),
     )
     private val byTool: Map<String, ToolGroup> = groups.flatMap { g -> g.tools.map { it to g } }.toMap()
     private val internal = setOf(Planner.PLAN_SET, Planner.PLAN_UPDATE)

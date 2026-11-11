@@ -96,15 +96,13 @@ object IntentGate {
     /** Tool names each intent may see. */
     val lookupTools = setOf("web_search", "browse_url", "http_request")
 
-    /** The phone tools (ToolCatalog "phone" group) — kept in step with ToolCatalog by UnifiedToolsTest. */
-    val phoneTools = setOf("phone_screen", "phone_open_app", "phone_tap", "phone_type", "phone_scroll", "phone_back", "phone_home", "phone_wait")
 
     /**
      * v0.7.0 (owner: "ask ho ya build, jo bolun wo ho jaye"): what a conversation or lookup turn may use —
-     * the web plus the phone. The v0.3 gate kept every tool out of CHAT, so a plainly-worded request in chat
+     * the web. The v0.3 gate kept every tool out of CHAT, so a plainly-worded request in chat
      * ("browser kholo, research karke batao") could never act; now the label only changes the prompt and the
      * effort, not the capability. File/command work still needs an ACTION turn, and small talk still gets
      * no tools at all (greetings stay instant and cheap).
      */
-    val chatTools = lookupTools + phoneTools
+    val chatTools = lookupTools
 }

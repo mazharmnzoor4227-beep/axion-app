@@ -36,7 +36,6 @@ class MainActivity : ComponentActivity() {
 
     private fun handleShare(i: Intent?) {
         if (i?.getBooleanExtra(com.mazharansari.axion.update.AppUpdater.EXTRA_OPEN_ABOUT, false) == true) { vm.debugStart = Route.About; return }   // "update available" notification
-        if (i?.getBooleanExtra(com.mazharansari.axion.wakeword.WakeWordService.EXTRA_START_CALL, false) == true) { vm.debugStart = Route.VoiceCall; return }   // Phase B: "Hey Axion" wake word opens the Live call
         if (i?.action != Intent.ACTION_SEND) return
         @Suppress("DEPRECATION") (i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))?.let { vm.addAttachment(it) }
         i.getStringExtra(Intent.EXTRA_TEXT)?.let { vm.draft = it }

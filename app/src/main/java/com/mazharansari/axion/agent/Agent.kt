@@ -57,7 +57,7 @@ class Agent(
             WebSearchTool(), BrowseTool(), RunCommandTool(), ReadFileTool(), WriteFileTool(), ListFilesTool(),
             ExtractZipTool(), CreatePdfTool(), LoadSkillTool(), InstallSkillsTool(), HttpRequestTool(),
             VideoProbeTool(), VideoEditTool(),   // axion-p1.6
-        ) + com.mazharansari.axion.phone.PhoneTools.all()   // axion-p3: filtered out unless Tools library → Phone control is ON
+        )
     }
 
     suspend fun run(
@@ -78,7 +78,7 @@ class Agent(
         val all = every.filter { ToolCatalog.isEnabled(it.spec.name, sw) }                       // axion-p3: Tools library switches
         val offNames = every.map { it.spec.name }.filter { !ToolCatalog.isEnabled(it, sw) }.toSet()
         // v0.7.0: one capability set in every surface. Small talk still gets NO tools (instant, cheap); any real
-        // chat or lookup request gets the web + phone tools (IntentGate.chatTools), so "open the browser and
+        // chat or lookup request gets the web tools (IntentGate.chatTools), so "open the browser and
         // research this" works wherever the user says it. File/command tools still need an ACTION turn.
         val tools = when (intent) {
             Intent.CHAT -> if (IntentGate.isSmallTalk(user.text, intent)) emptyList() else all.filter { it.spec.name in IntentGate.chatTools }
@@ -91,8 +91,7 @@ class Agent(
         // Keep requests small (Groq free tier: 8k tokens/min): recent turns verbatim, everything older → "Session notes" (decisions never dropped).
         val folded = HistoryCompressor.compress(history)
         val sys = systemPrompt(profile, tools, intent) + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
-            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") +
-            (if (tools.any { it.spec.name == "phone_screen" }) "\n\n" + com.mazharansari.axion.phone.PhoneTools.PROMPT else "")
+            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "")
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user
@@ -263,7 +262,7 @@ class Agent(
             } else {
                 appendLine()
                 appendLine("Tools for this request:")
-                if (intent == Intent.LOOKUP || intent == Intent.CHAT) appendLine("- Use web_search, then browse_url on the best results, and answer with facts you actually read. Never invent URLs, prices or numbers. If the user asks you to open an app or do something on the phone, use the phone tools (start with phone_screen). Only act when the user clearly asks.")
+                if (intent == Intent.LOOKUP || intent == Intent.CHAT) appendLine("- Use web_search, then browse_url on the best results, and answer with facts you actually read. Never invent URLs, prices or numbers. Only act when the user clearly asks.")
                 else {
                     appendLine("- web_search + browse_url for current facts or websites; run_command for shell work; read_file/list_files/extract_zip for uploads (in uploads/); write_file for code/documents (files go in outputs/); create_pdf for reports; generate_image for pictures.")
                     appendLine("- Load the matching skill (load_skill) before a specialised task. A GitHub URL with skills → install_skills_from_github.")
