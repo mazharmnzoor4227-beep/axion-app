@@ -45,6 +45,8 @@ data class AppSettings(
     val freeMode: Boolean = false,
     /** v0.11: the composer's Research toggle — while on, factual questions go through the deep_research pipeline. */
     val deepResearch: Boolean = false,
+    /** v0.12: the composer's Long task toggle — while on, ACTION turns get a far bigger step/tool budget and plan-verify-finish guidance. */
+    val longTask: Boolean = false,
     /** v0.5: the Build first-run "Install developer tools" popup was shown (addendum 2). */
     val buildIntroShown: Boolean = false,
     /** v0.5.3: the user chose "Continue as guest" on the sign-in screen (it then stays away; Settings → Account signs in). */

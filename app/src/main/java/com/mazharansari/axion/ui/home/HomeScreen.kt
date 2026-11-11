@@ -325,6 +325,19 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                         modifier = Modifier.padding(bottom = 16.dp),
                     )
                 }
+                // v0.12: a long task the app lost mid-way gets a visible way back, above the composer.
+                vm.interruptedTask?.let { rec ->
+                    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card).border(1.dp, p.border, RoundedCornerShape(16.dp)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        GkIcon(Gk.history, null, 18.dp, p.text2); Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("A long task was interrupted", style = Type.small.copy(fontWeight = FontWeight.SemiBold), color = p.text)
+                            Text(rec.goal.take(90), style = Type.tiny, color = p.text2, maxLines = 1)
+                        }
+                        TextButton(onClick = { vm.resumeInterruptedTask() }) { Text("Open chat", color = p.accent) }
+                        TextButton(onClick = { vm.dismissInterruptedTask() }) { Text("Dismiss", color = p.text2) }
+                    }
+                }
                 // v0.5.2 (mazhar's test): Build never shows the Ask-only key chips — it shows what Build actually needs.
                 if (messages.isEmpty() && !plus && !model && build) BuildChips(ready = vm.buildReady(), onAgy = { navigate(Route.Antigravity) }, onTools = { navigate(Route.DevTools) })
                 else if (messages.isEmpty() && !plus && !model) SuggestionChips(noKeys = connectors.isEmpty(), onConnect = { navigate(Route.Connectors) }, onSkills = { navigate(Route.Skills) }, onBuild = onBuild, onVoice = { navigate(Route.VoiceCall) })
@@ -346,6 +359,37 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                     plusOpen = plus, modeOpen = model, onFocus = { vm.prewarm() },
                     researchOn = if (build) null else settings.deepResearch,
                     onResearch = { g.settings.update { it.copy(deepResearch = !it.deepResearch) } },
+                    longTaskOn = if (build) null else settings.longTask,
+                    onLongTask = { g.settings.update { it.copy(longTask = !it.longTask) } },
+                )
+            }
+            // v0.12: the approval gate — a consequential shell command waits for the user's answer.
+            vm.pendingApproval?.let { pa ->
+                AlertDialog(
+                    onDismissRequest = { vm.answerApproval(com.mazharansari.axion.agent.ApprovalDecision.DENY) },
+                    containerColor = p.card, shape = RoundedCornerShape(24.dp),
+                    title = { Text("Allow this command?", style = Type.title, color = p.text) },
+                    text = {
+                        Column {
+                            Text(pa.req.summary.take(600), style = Type.small.copy(fontSize = 14.sp, lineHeight = 20.sp), color = p.text)
+                            if (pa.req.hard) {
+                                Spacer(Modifier.height(10.dp))
+                                Text(pa.req.hardReason + " This kind can never be remembered — Axion will ask every time.", style = Type.small, color = p.danger)
+                            } else if (pa.req.pattern.isNotBlank()) {
+                                Spacer(Modifier.height(10.dp))
+                                Text("\"Always allow\" remembers this kind of command (${pa.req.pattern}) — revoke it any time in Settings → Approvals.", style = Type.small, color = p.text2)
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Row {
+                            TextButton(onClick = { vm.answerApproval(com.mazharansari.axion.agent.ApprovalDecision.DENY) }) { Text("Deny", color = p.danger) }
+                            if (!pa.req.hard && pa.req.pattern.isNotBlank())
+                                TextButton(onClick = { vm.answerApproval(com.mazharansari.axion.agent.ApprovalDecision.ALLOW_REMEMBER) }) { Text("Always allow", color = p.text) }
+                            TextButton(onClick = { vm.answerApproval(com.mazharansari.axion.agent.ApprovalDecision.ALLOW_ONCE) }) { Text("Allow once", color = p.accent) }
+                        }
+                    },
+                    dismissButton = {},
                 )
             }
             // Grok's pull-up indicator, rising from just above the composer as the chat is lifted.

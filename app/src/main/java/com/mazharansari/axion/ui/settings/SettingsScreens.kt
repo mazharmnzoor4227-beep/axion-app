@@ -109,6 +109,7 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
             SettingsRow(Gk.connectors, "Connectors", subtitle = if (keys.isEmpty()) "None" else keys.joinToString(", ") { it.provider.name }.take(40)) { nav(Route.Connectors) }
             SettingsRow(Gk.skills, "Skills", subtitle = "${skills.count { it.enabled }} enabled") { nav(Route.Skills) }
             SettingsRow(Gk.brain, "Memory", subtitle = memCount.let { if (it == 0) "What Axion remembers about you" else "$it saved" }) { nav(Route.Memory) }
+            SettingsRow(Gk.shield, "Approvals", subtitle = vm.g.approvals.rules.collectAsState().value.size.let { if (it == 0) "Commands Axion may run without asking" else "$it remembered" }) { nav(Route.Approvals) }
             SettingsRow(Gk.tool, "Tools library", subtitle = com.mazharansari.axion.agent.ToolCatalog.groups.count { com.mazharansari.axion.agent.ToolCatalog.isEnabled(it, s.toolSwitches) }.let { "$it of ${com.mazharansari.axion.agent.ToolCatalog.groups.size} on" }) { nav(Route.ToolsLibrary) }   // axion-p3
             SettingsRow(Gk.globe, "Browser", subtitle = "Axion's own — real pages, forms, screenshots") { nav(Route.Browser) }
             SettingsRow(Gk.terminal, "Terminal", subtitle = "Linux shell — run commands yourself") { nav(Route.Terminal) }

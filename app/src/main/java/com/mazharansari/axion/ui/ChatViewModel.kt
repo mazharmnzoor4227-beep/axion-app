@@ -52,6 +52,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     // v0.5: quiet update check on app start (at most once a day; a notification only when something newer is out)
     init { viewModelScope.launch { runCatching { g.updater.quietCheck() } } }
+
+    // ── v0.12 approvals: a gated shell action waits here until the user answers the dialog ─────────────────────────
+    data class PendingApproval(val req: GateRequest, val deferred: CompletableDeferred<ApprovalDecision>)
+    var pendingApproval by mutableStateOf<PendingApproval?>(null); private set
+    fun answerApproval(d: ApprovalDecision) { pendingApproval?.deferred?.complete(d) }
+    private val approver = object : Approver {
+        override suspend fun decide(req: GateRequest): ApprovalDecision {
+            val deferred = CompletableDeferred<ApprovalDecision>()
+            withContext(Dispatchers.Main.immediate) { pendingApproval = PendingApproval(req, deferred) }
+            try { return deferred.await() }
+            finally { withContext(NonCancellable + Dispatchers.Main.immediate) { if (pendingApproval?.deferred === deferred) pendingApproval = null } }
+        }
+    }
+
+    // ── v0.12 long tasks: a run the app lost mid-way (killed / crashed) is surfaced, not silently gone ─────────────
+    var interruptedTask by mutableStateOf<com.mazharansari.axion.data.TaskRunRecord?>(null); private set
+    init {
+        viewModelScope.launch {
+            val rec = g.taskRuns.current.value
+            if (rec != null && rec.status == "running") { g.taskRuns.finish("interrupted"); interruptedTask = rec.copy(status = "interrupted") }
+        }
+    }
+    fun dismissInterruptedTask() { interruptedTask = null; g.taskRuns.clear() }
+    fun resumeInterruptedTask() { interruptedTask?.let { open(it.conversationId) }; interruptedTask = null }
     var debugOpenFile by mutableStateOf<String?>(null)
     var debugEditing by mutableStateOf(false)
     var debugDeploySheet by mutableStateOf(false)
@@ -458,6 +482,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val sec = section
         // v0.11: Research mode (composer toggle) — a research turn is never "quick" small talk.
         val researchOn = sec == Section.ASK && s.deepResearch
+        // v0.12: Long task mode (composer toggle) — bigger budgets + a persisted run record.
+        val longTaskOn = sec == Section.ASK && s.longTask
         val quick = sec == Section.ASK && !researchOn && com.mazharansari.axion.agent.IntentGate.isSmallTalk(u.text, intent)
         val userItem = UserItem(u.text.ifBlank { "Look at the attached file(s)." } + attachmentNote(u.attachments), media(u.attachments))
         val aid = UUID.randomUUID().toString()
@@ -488,6 +514,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             // background and the projects list / chat drawer can show it as Working.
             g.runs.register("run-$aid", sess.kind, sess.ownerId, sess.title.ifBlank { "Working" }, coroutineContext[kotlinx.coroutines.Job]!!, started)
             com.mazharansari.axion.work.WorkService.refresh(getApplication())   // the notification now lists this run too
+            if (longTaskOn) g.taskRuns.start(u.text, convId)   // v0.12: survives an app kill; see interruptedTask
             // UI ticker: at most ~16 updates/s however fast tokens arrive, so long answers never jank the list.
             val ticker = launch { while (isActive) { delay(45); flush(sess) } }   // v0.4: ~22 UI updates/s while streaming
             val sink = object : AgentSink {
@@ -497,10 +524,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     if (t.isNotBlank()) buf.reasoning.append(if (buf.reasoning.isEmpty()) "" else "\n\n").append(t.trim())
                     buf.dirty = true
                 }
-                override fun step(step: Step) = synchronized(buf) {
-                    val i = buf.steps.indexOfFirst { it.id == step.id }
-                    if (i >= 0) buf.steps[i] = step else buf.steps += step
-                    buf.roundStart = buf.text.length; buf.dirty = true
+                override fun step(step: Step) {
+                    synchronized(buf) {
+                        val i = buf.steps.indexOfFirst { it.id == step.id }
+                        if (i >= 0) buf.steps[i] = step else buf.steps += step
+                        buf.roundStart = buf.text.length; buf.dirty = true
+                    }
+                    if (longTaskOn && step.status != StepStatus.RUNNING)
+                        g.taskRuns.progress(synchronized(buf) { buf.steps.count { it.status != StepStatus.RUNNING } })   // v0.12
                 }
                 override fun artifact(a: Artifact) = synchronized(buf) { buf.artifacts += a; buf.dirty = true }
                 override fun plan(steps: List<PlanStep>) = synchronized(buf) { buf.plan = steps; buf.dirty = true }   // axion-p2
@@ -522,7 +553,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val pid = sess.pid
                 if (sec == Section.BUILD && pid != null) withContext(Dispatchers.Default) { runBuildTurn(pid, u, sink) }
                 else withContext(Dispatchers.Default) {
-                    Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn).run(
+                    Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn,
+                        approvals = g.approvals, approver = approver, longTask = longTaskOn).run(
                         history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }) }, sink = sink,
                         profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
                         intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools
@@ -533,7 +565,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             catch (e: LlmException) { status = MsgStatus.ERROR; error = friendly(e) }
             catch (e: Throwable) { status = MsgStatus.ERROR; error = e.message ?: e.toString() }
             ticker.cancel()
-            if (buf.closed) { sessions.remove(convId); refreshRunning(); return@launch }   // Stop already froze this reply into its own conversation
+            if (buf.closed) { if (longTaskOn) g.taskRuns.finish("interrupted"); sessions.remove(convId); refreshRunning(); return@launch }   // Stop already froze this reply into its own conversation
             withContext(NonCancellable) {
                 buf.dirty = true; flush(sess)
                 sess.msgs = sess.msgs.map {
@@ -548,6 +580,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 refreshRunning()
                 if (requestAt > 0) lastTiming = (requestAt - tapped) to (if (firstAt > 0) firstAt - tapped else -1L)
                 persist(sess, immediate = true)
+                if (longTaskOn) g.taskRuns.finish(if (status == MsgStatus.DONE) "done" else "interrupted")   // v0.12
                 if (status == MsgStatus.DONE && s.autoRead) sess.msgs.firstOrNull { it.id == aid }?.let { speak(it) }
             }
         }

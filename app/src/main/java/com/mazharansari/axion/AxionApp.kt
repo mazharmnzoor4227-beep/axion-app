@@ -39,6 +39,10 @@ class Graph(val app: Application) {
     val skills by lazy { SkillRepo(app, File(app.filesDir, "skills")) }
     /** v0.10: the learning loop's persistent memory (agent-curated; Settings → Memory shows it all). */
     val memory by lazy { com.mazharansari.axion.data.MemoryStore(app) }
+    /** v0.12: remembered approvals for gated shell work (Settings → Approvals shows/revokes them). */
+    val approvals by lazy { com.mazharansari.axion.data.ApprovalsStore(app) }
+    /** v0.12: the in-flight long-task record, so an app kill mid-task is visible on the next start. */
+    val taskRuns by lazy { com.mazharansari.axion.data.TaskRunStore(app) }
     val mcp by lazy { McpRepo(app.filesDir) }
     val speaker by lazy { Speaker(app) }
     val imageGen by lazy {

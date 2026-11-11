@@ -57,6 +57,12 @@ class Agent(
     private val conversations: com.mazharansari.axion.data.ConversationStore? = null,
     /** v0.11: the user switched Deep Research mode on in the composer — factual turns must research, not recall. */
     private val researchMode: Boolean = false,
+    /** v0.12: remembered approvals for gated shell work (null = no memory: only the interactive approver can allow). */
+    private val approvals: com.mazharansari.axion.data.ApprovalsStore? = null,
+    /** v0.12: asks the user about a gated action (null = headless: remembered kinds only, everything else refused). */
+    private val approver: Approver? = null,
+    /** v0.12: Long task mode — bigger round/tool budgets and plan-verify-finish guidance. */
+    private val longTask: Boolean = false,
 ) {
     companion object {
         fun defaultTools(): List<Tool> = listOf(
@@ -79,6 +85,14 @@ class Agent(
 - For anything that needs facts — current information, prices, comparisons, "which is better", how something works in the real world, a decision the user is weighing — call deep_research FIRST with the user's topic (depth "deep"; use "standard" only when the user asks for something quick), then present its report in full, keeping the [n] citations and the Sources list.
 - Do not answer a factual question from your own memory alone while this mode is on.
 - Pure conversation — greetings, opinions, thanks, and follow-ups about a report already given — needs no new research."""
+
+        /** v0.12: Long task mode — the run is a project, not a quick favour. */
+        const val LONG_TASK_GUIDANCE = """LONG TASK MODE is ON (the user switched it on in the composer):
+- Treat this as a long task: set a plan first (plan_set) with every step, then work through it step by step.
+- After each step, verify the result before moving on (re-read the file, re-run the check, look at the output). Do not assume a step worked.
+- You have a much larger step and tool budget than usual; use it — do not rush to finish early or skip verification to save steps.
+- If a step fails, try a different approach before giving up on it.
+- Keep the plan updated as you go (plan_update). Finish with a summary of everything that was done and anything left over."""
 
         /** One internal model call (research planning / synthesis) may take this long before the next model is tried. */
         const val ASK_TIMEOUT_MS = 180_000L
@@ -125,8 +139,9 @@ class Agent(
         val memBlock = memory?.promptBlock().orEmpty()
         val learnBlock = if (memory != null && tools.any { it.spec.name == "memory_add" || it.spec.name == "skill_create" }) "\n\n" + LEARNING_GUIDANCE else ""
         val researchBlock = if (researchMode && tools.any { it.spec.name == "deep_research" }) "\n\n" + RESEARCH_GUIDANCE else ""
+        val longTaskBlock = if (longTask && intent == Intent.ACTION) "\n\n" + LONG_TASK_GUIDANCE else ""
         val sys = systemPrompt(profile, tools, intent) + memBlock + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
-            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock
+            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock + longTaskBlock
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user
@@ -136,7 +151,8 @@ class Agent(
         val effort = if (quick || (intent == Intent.CHAT && user.text.trim().length <= 160)) "low" else null
         var planPhase = wantsPlan && tools.any { it.spec.name == Planner.PLAN_SET }
         var toolsOff = false
-        val policy = FaultPolicy()
+        // v0.12: a long task gets a far bigger budget (and more alternative attempts) than a quick favour.
+        val policy = FaultPolicy(maxAlternatives = if (longTask) 6 else 2, maxToolCalls = if (longTask) 200 else 40)
         // v0.11: tools that think internally (deep research) get plain completions on this run's own models.
         val ask: suspend (String) -> String = { prompt -> askOnce(attempts, prompt) }
         repeat(maxRounds) { round ->
@@ -156,6 +172,31 @@ class Agent(
                     items += ToolResultItem(call.id, call.name, o.forModel); continue
                 }
                 if (toolsOff) { items += ToolResultItem(call.id, call.name, "Tools are switched off for the rest of this task. Explain to the user what failed and why."); continue }
+                // v0.12: the approval gate — consequential shell work needs the user's OK (or a remembered rule).
+                var rememberedNote = false
+                val gate = ApprovalGate.requestFor(call.name, args)
+                if (gate != null) {
+                    if (!gate.hard && approvals?.matches(gate.pattern) == true) {
+                        rememberedNote = true
+                    } else {
+                        val decision = if (approver != null) approver.decide(gate) else ApprovalDecision.DENY
+                        if (decision == ApprovalDecision.ALLOW_REMEMBER && !gate.hard) approvals?.add(gate.pattern, gate.summary)
+                        if (decision == ApprovalDecision.DENY) {
+                            val gl = tool.label(args)
+                            val why = when {
+                                gate.hard -> "needs a fresh confirmation every time (${gate.hardReason})"
+                                approver == null -> "needs the user's approval, and nobody can be asked in this run"
+                                else -> "the user did not approve it"
+                            }
+                            sink.step(Step(id = UUID.randomUUID().toString(), kind = gl.kind, title = "Not approved", target = gl.target, status = StepStatus.ERROR,
+                                startedAt = System.currentTimeMillis(), endedAt = System.currentTimeMillis(),
+                                output = "Blocked: this command $why."))
+                            items += ToolResultItem(call.id, call.name,
+                                "The command was NOT run: it $why. Do not try to work around this (no other tool, no different spelling of the same command). Either continue the task without it or explain to the user what you needed it for.")
+                            continue
+                        }
+                    }
+                }
                 val label = tool.label(args)
                 val detail = when (call.name) {
                     "write_file" -> (args["content"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
@@ -177,7 +218,7 @@ class Agent(
                 val out = outcome.output
                 val failedKind = outcome.kind == FaultPolicy.Kind.FAILED || outcome.kind == FaultPolicy.Kind.TIMED_OUT || outcome.kind == FaultPolicy.Kind.SKIPPED_REPEAT || outcome.kind == FaultPolicy.Kind.BUDGET
                 val doneTitle = (out.doneTitle ?: label.title) + if (outcome.kind == FaultPolicy.Kind.RETRIED_OK) " (retried)" else ""
-                val shown = if (failedKind) (if (outcome.mustReport) "Gave up: " else "Trying another way — ") + out.display.take(300) else out.display
+                val shown = (if (rememberedNote) "(remembered approval) " else "") + if (failedKind) (if (outcome.mustReport) "Gave up: " else "Trying another way — ") + out.display.take(300) else out.display
                 sink.step(step.copy(
                     title = doneTitle, status = if (out.isError) StepStatus.ERROR else StepStatus.DONE,
                     output = com.mazharansari.axion.security.SecretScanner.scrub(shown.clip(20000)), endedAt = System.currentTimeMillis(), exitCode = out.exitCode,   // axion-p1.4; v0.6.1: persisted step output cap 4k -> 20k
