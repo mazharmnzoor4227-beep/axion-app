@@ -95,7 +95,7 @@ object ApprovalGate {
         if (Regex("\\b(bank|banking|payment|pay now|paytm|easypaisa|jazzcash|raast|paypal|stripe|checkout|billing|credit card|debit card|send money|transfer money|wire transfer|upi)\\b").containsMatchIn(c))
             return "This mentions banking or a payment."
         // irreversibly destructive shell work
-        if (Regex("rm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\s+(/|~|\\$home|/data|/system|/storage)(\\s|/|$)").containsMatchIn(c))
+        if (Regex("rm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\s+(/|~|[$]home|/data|/system|/storage)(\\s|/|$)").containsMatchIn(c))
             return "This deletes files at the root of the phone's storage."
         if (Regex("\\bmkfs|\\bdd\\s+[^|]*of=/dev/|>\\s*/dev/block|\\bformat\\s+/dev/").containsMatchIn(c))
             return "This can format or overwrite a whole storage device."
