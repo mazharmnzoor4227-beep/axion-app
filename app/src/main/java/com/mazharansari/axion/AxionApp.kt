@@ -19,6 +19,7 @@ class AxionApp : Application() {
         if (BuildConfig.DEBUG) android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().detectNetwork().penaltyLog().build())
         com.mazharansari.axion.voice.VoicePrefs.migrate(this); graph = Graph(this)
         com.mazharansari.axion.linux.LinuxHub.graph = graph
+        com.mazharansari.axion.browser.BrowserHub.graph = graph
         com.mazharansari.axion.local.LocalEngine.libDir = applicationInfo.nativeLibraryDir.orEmpty()   // null under Robolectric
         Thread { runCatching { graph.quota } }.start()   // opens usage.db, restores key cool-downs, hooks rate-limit headers
         // v0.5.2 security: the scanner knows the user's own keys/tokens (so even shapeless tokens are caught), and any
@@ -50,6 +51,11 @@ class Graph(val app: Application) {
     // v0.4 — Linux (PRoot), developer tools, Antigravity accounts, quota.
     val linux by lazy { com.mazharansari.axion.linux.LinuxRuntime(app) }
     val devtools by lazy { com.mazharansari.axion.linux.DevTools(app, linux) }
+    // v0.9 — Axion's own browser (one shared WebView for the Browser screen + the agent) and the terminal:
+    // one persistent shell session + background jobs, both on the same PRoot Ubuntu.
+    val browser by lazy { com.mazharansari.axion.browser.BrowserController(app) }
+    val shell by lazy { com.mazharansari.axion.linux.ShellSession(linux) }
+    val jobs by lazy { com.mazharansari.axion.linux.BackgroundJobs(app, linux) }
     val agy by lazy { com.mazharansari.axion.antigravity.AgyAccounts(app) }
     val agyLogin by lazy { com.mazharansari.axion.antigravity.AgyLogin(linux, agy) }
     val quota by lazy {

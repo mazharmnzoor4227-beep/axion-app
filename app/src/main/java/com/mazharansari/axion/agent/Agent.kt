@@ -57,6 +57,10 @@ class Agent(
             WebSearchTool(), BrowseTool(), RunCommandTool(), ReadFileTool(), WriteFileTool(), ListFilesTool(),
             ExtractZipTool(), CreatePdfTool(), LoadSkillTool(), InstallSkillsTool(), HttpRequestTool(),
             VideoProbeTool(), VideoEditTool(),   // axion-p1.6
+            // v0.9: Axion's own browser (real WebView) + the persistent terminal and background jobs
+            BrowserOpenTool(), BrowserReadTool(), BrowserClickTool(), BrowserTypeTool(), BrowserScrollTool(),
+            BrowserBackTool(), BrowserForwardTool(), BrowserReloadTool(), BrowserSearchTool(), BrowserScreenshotTool(),
+            ShellSessionTool(), ShellResetTool(), RunBackgroundTool(), JobOutputTool(), JobKillTool(),
         )
     }
 
@@ -257,14 +261,17 @@ class Agent(
             appendLine("STYLE: talk like a smart friend in a chat — short and natural. Greetings and small talk get one or two warm lines, no headings, no lists. Use markdown only for real content (steps, tables, code).")
             appendLine("ACTIONS: only DO things (search, create files, run commands, build) when the user clearly asks for that action. Never create or write files for a greeting, a question, or small talk. If you are not sure what they want, ask ONE short question instead of acting.")
             appendLine("ABOUT YOU (answer honestly if asked): you can chat in English/Urdu/Roman Urdu, search the web and read pages, read uploaded files (PDF, docs, ZIP), write files and code, make PDF reports and images, run shell commands (${com.mazharansari.axion.linux.LinuxHub.devtools?.summaryForAgent() ?: "Android sh with toybox tools — Python/Node are NOT installed until the user installs Developer tools in Settings"}), use installed skills and MCP connectors, and do voice calls. Websites/apps are built in the Build tab.")
+            appendLine("You also have your OWN real web browser (the browser_* tools: pages open with JavaScript, cookies and logins persist, you can click, type into forms and take screenshots — the user can watch or take over in the Browser screen) and a persistent Linux terminal (shell_session keeps its directory and variables between commands; run_background runs long jobs).")
             if (tools.isEmpty()) {
                 appendLine("This message is conversation: answer directly from what you know. No tools are available for it; if the user wants you to search or make something, they can just ask.")
             } else {
                 appendLine()
                 appendLine("Tools for this request:")
-                if (intent == Intent.LOOKUP || intent == Intent.CHAT) appendLine("- Use web_search, then browse_url on the best results, and answer with facts you actually read. Never invent URLs, prices or numbers. Only act when the user clearly asks.")
+                if (intent == Intent.LOOKUP || intent == Intent.CHAT) appendLine("- Use web_search, then browse_url on the best results, and answer with facts you actually read. Never invent URLs, prices or numbers. Only act when the user clearly asks. If a page needs JavaScript, a form, a click or a login, use your browser instead: browser_open the URL, browser_read it, then browser_click / browser_type with the element numbers from the read.")
                 else {
                     appendLine("- web_search + browse_url for current facts or websites; run_command for shell work; read_file/list_files/extract_zip for uploads (in uploads/); write_file for code/documents (files go in outputs/); create_pdf for reports; generate_image for pictures.")
+                    appendLine("- YOUR BROWSER (browser_* tools): a real browser — use it when a page needs JavaScript, clicking, typing into forms, logging in, or step-by-step navigation. Flow: browser_open (or browser_search) → read the numbered elements → browser_click / browser_type by number → browser_read again after each navigation (numbers change). browse_url is still the faster choice for a plain article or a quick static read. browser_screenshot saves a picture of the page for the user.")
+                    appendLine("- TERMINAL: run_command is a fresh shell each time (quick one-off commands). shell_session is ONE persistent shell — cd and exported variables survive between calls; use it for multi-step work in one place. run_background + job_output + job_kill are for commands that take many minutes (builds, downloads, servers) so the chat is not blocked.")
                     appendLine("- Load the matching skill (load_skill) before a specialised task. A GitHub URL with skills → install_skills_from_github.")
                     appendLine("- Safe steps need no permission; ask before anything destructive, paid or public. Finish with a short summary of what you did.")
                     val skillList = skills.skills.value.filter { it.enabled }.joinToString("\n") { "  - ${it.name}: ${it.description.take(100)}" }

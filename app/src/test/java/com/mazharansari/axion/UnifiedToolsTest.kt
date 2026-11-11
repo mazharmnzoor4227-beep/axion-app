@@ -79,8 +79,10 @@ class UnifiedToolsTest {
     }
 
     @Test fun catalogAndGateWebListsMatch() {
-        // IntentGate's web list must name exactly the ToolCatalog "web" group, or a tool would silently vanish from chat.
-        assertEquals(ToolCatalog.groups.first { it.id == "web" }.tools, IntentGate.lookupTools)
+        // IntentGate's lookup list must name exactly the ToolCatalog "web" + "browser" groups (v0.9: the agent's
+        // own browser is a lookup tool too), or a tool would silently vanish from chat.
+        val expected = ToolCatalog.groups.first { it.id == "web" }.tools + ToolCatalog.groups.first { it.id == "browser" }.tools
+        assertEquals(expected, IntentGate.lookupTools)
         assertEquals(IntentGate.lookupTools, IntentGate.chatTools)
     }
 }

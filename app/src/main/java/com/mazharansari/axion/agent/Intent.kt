@@ -94,7 +94,12 @@ object IntentGate {
     }
 
     /** Tool names each intent may see. */
-    val lookupTools = setOf("web_search", "browse_url", "http_request")
+    val lookupTools = setOf(
+        "web_search", "browse_url", "http_request",
+        // v0.9: the agent's own browser belongs in chat/lookup too — "browser kholo, research karke batao" must work here
+        "browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll",
+        "browser_back", "browser_forward", "browser_reload", "browser_search", "browser_screenshot",
+    )
 
 
     /**

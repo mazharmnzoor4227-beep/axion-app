@@ -65,6 +65,8 @@ class FaultPolicy(
     companion object {
         fun timeoutFor(tool: String, args: kotlinx.serialization.json.JsonObject): Long = when (tool) {
             "run_command" -> ((args.i("timeout_sec") ?: 60).coerceIn(1, 600) + 40) * 1000L
+            "shell_session" -> ((args.i("timeout_sec") ?: 120).coerceIn(1, 600) + 40) * 1000L
+            "browser_open", "browser_search" -> 120_000L
             "video_edit" -> 1_700_000L
             "video_probe" -> 120_000L
             "generate_image" -> 150_000L
