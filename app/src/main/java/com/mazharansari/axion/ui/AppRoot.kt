@@ -80,6 +80,7 @@ fun AppRoot(vm: ChatViewModel) {
                         Route.Storage -> StorageScreen(vm, back, vm.debugStorage?.first, vm.debugStorage?.second)
                         Route.Browser -> com.mazharansari.axion.ui.browser.BrowserScreen(vm, back)
                         Route.Terminal -> TerminalScreen(vm, nav, back)
+                        Route.Memory -> MemoryScreen(vm, back)
                     } }
                 }
                 // v0.8.3: while a Live call is held by the view model and the call screen is not

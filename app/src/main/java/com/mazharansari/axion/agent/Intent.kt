@@ -99,6 +99,9 @@ object IntentGate {
         // v0.9: the agent's own browser belongs in chat/lookup too — "browser kholo, research karke batao" must work here
         "browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll",
         "browser_back", "browser_forward", "browser_reload", "browser_search", "browser_screenshot",
+        // v0.10: memory is conversational — "ye yaad rakhna", "mera naam … hai", "last time hum ne kya decide kiya tha"
+        // must work in plain chat, not only in ACTION turns. Skill writing stays ACTION-only (creating things).
+        "memory_add", "memory_replace", "memory_remove", "memory_read", "session_search",
     )
 
 

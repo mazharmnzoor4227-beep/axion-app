@@ -51,6 +51,10 @@ class Agent(
     private val stallMs: Long = 10_000,
     /** A reasoning model may think visibly (reasoning keeps streaming) this long before it must start answering. */
     private val thinkCapMs: Long = 45_000,
+    /** v0.10 learning loop: the persistent, agent-curated memory (snapshot goes into every prompt). */
+    private val memory: com.mazharansari.axion.data.MemoryStore? = null,
+    /** v0.10 learning loop: saved conversations, backing the session_search tool. */
+    private val conversations: com.mazharansari.axion.data.ConversationStore? = null,
 ) {
     companion object {
         fun defaultTools(): List<Tool> = listOf(
@@ -61,7 +65,16 @@ class Agent(
             BrowserOpenTool(), BrowserReadTool(), BrowserClickTool(), BrowserTypeTool(), BrowserScrollTool(),
             BrowserBackTool(), BrowserForwardTool(), BrowserReloadTool(), BrowserSearchTool(), BrowserScreenshotTool(),
             ShellSessionTool(), ShellResetTool(), RunBackgroundTool(), JobOutputTool(), JobKillTool(),
+            // v0.10: the learning loop — persistent memory, self-written skills, past-chat search
+            MemoryAddTool(), MemoryReplaceTool(), MemoryRemoveTool(), MemoryReadTool(),
+            SkillCreateTool(), SkillUpdateTool(), SkillDeleteTool(), SkillViewTool(), SessionSearchTool(),
         )
+
+        /** Hermes-style learning nudge, appended whenever the memory/skill tools are in play. */
+        const val LEARNING_GUIDANCE = """LEARNING — you improve between chats, like this:
+- MEMORY: you have a small persistent memory (memory_add / memory_replace / memory_remove / memory_read). When the user states a preference or habit, corrects you, or you learn a durable fact about them or their projects (names, decisions, lessons), save it — 'user' target for who they are and how they like things, 'memory' for facts and lessons. When a saved fact changes, memory_replace it instead of adding a conflicting second entry. Keep entries short and durable; never save passwords, keys or one-off small talk. Your saved memory is shown at the top of this prompt in future chats.
+- SKILLS: when you finish a task that took several steps, a tricky workaround, or a procedure the user may ask for again, write it down with skill_create (clear steps, pitfalls, how to verify) so you repeat it the same way; when using a skill teaches you something better, improve it with skill_update. Before a specialised task, load the matching skill (load_skill / skill_view) — your own learned skills are in the skills list like the others.
+- PAST CHATS: when the user refers to something from an earlier conversation ("last time…", "jo pehle decide hua tha") or you need an old decision, use session_search instead of guessing."""
     }
 
     suspend fun run(
@@ -94,8 +107,12 @@ class Agent(
         val hint = ScriptHint.note(user.text, history, followUp)
         // Keep requests small (Groq free tier: 8k tokens/min): recent turns verbatim, everything older → "Session notes" (decisions never dropped).
         val folded = HistoryCompressor.compress(history)
-        val sys = systemPrompt(profile, tools, intent) + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
-            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "")
+        // v0.10: the memory snapshot rides in EVERY prompt (even small talk — it is how Axion knows the user);
+        // the learning guidance is added whenever this turn actually has the memory/skill tools.
+        val memBlock = memory?.promptBlock().orEmpty()
+        val learnBlock = if (memory != null && tools.any { it.spec.name == "memory_add" || it.spec.name == "skill_create" }) "\n\n" + LEARNING_GUIDANCE else ""
+        val sys = systemPrompt(profile, tools, intent) + memBlock + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
+            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user
@@ -113,7 +130,7 @@ class Agent(
             items += AssistantItem(text, calls)
             if (calls.isEmpty()) { answer.append(text); if (planState.active) { planState.finish(ok = !toolsOff, reason = "stopped early"); onPlan() }; return answer.toString() }
             if (text.isNotBlank()) sink.textToThoughts()
-            val ctx = ToolContext(workspace, skills)
+            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations)
             for (call in calls) {
                 val tool = byName[call.name]
                 val args = runCatching { Json.parseToJsonElement(call.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
@@ -132,7 +149,7 @@ class Agent(
                 val step = Step(id = UUID.randomUUID().toString(), kind = label.kind, title = label.title, target = label.target, status = StepStatus.RUNNING, startedAt = System.currentTimeMillis(), detail = detail)
                 sink.step(step)
                 var lastPush = 0L
-                val live = ToolContext(workspace, skills) { partial ->
+                val live = ToolContext(workspace, skills, memory = memory, chats = conversations) { partial ->
                     val now = System.currentTimeMillis()
                     if (now - lastPush > 250) { lastPush = now; sink.step(step.copy(output = com.mazharansari.axion.security.SecretScanner.scrub(partial))) }
                 }

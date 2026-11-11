@@ -70,6 +70,8 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
     val p = P
     val keys by vm.g.connectors.list.collectAsState()
     val skills by vm.g.skills.skills.collectAsState()
+    val memData by vm.g.memory.data.collectAsState()
+    val memCount = memData.user.size + memData.notes.size
     SettingsPage("Settings", back, close = true) {
         // profile card
         Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(p.card).clickable { nav(Route.Customize) }.padding(16.dp),
@@ -106,6 +108,7 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
             SettingsRow(Gk.wand, "Customize Axion") { nav(Route.Customize) }
             SettingsRow(Gk.connectors, "Connectors", subtitle = if (keys.isEmpty()) "None" else keys.joinToString(", ") { it.provider.name }.take(40)) { nav(Route.Connectors) }
             SettingsRow(Gk.skills, "Skills", subtitle = "${skills.count { it.enabled }} enabled") { nav(Route.Skills) }
+            SettingsRow(Gk.brain, "Memory", subtitle = memCount.let { if (it == 0) "What Axion remembers about you" else "$it saved" }) { nav(Route.Memory) }
             SettingsRow(Gk.tool, "Tools library", subtitle = com.mazharansari.axion.agent.ToolCatalog.groups.count { com.mazharansari.axion.agent.ToolCatalog.isEnabled(it, s.toolSwitches) }.let { "$it of ${com.mazharansari.axion.agent.ToolCatalog.groups.size} on" }) { nav(Route.ToolsLibrary) }   // axion-p3
             SettingsRow(Gk.globe, "Browser", subtitle = "Axion's own — real pages, forms, screenshots") { nav(Route.Browser) }
             SettingsRow(Gk.terminal, "Terminal", subtitle = "Linux shell — run commands yourself") { nav(Route.Terminal) }

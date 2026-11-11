@@ -49,6 +49,43 @@ class SkillRepo(private val ctx: Context?, private val dir: File) {
 
     fun setEnabled(name: String, on: Boolean) { _skills.value = _skills.value.map { if (it.name == name) it.copy(enabled = on) else it }; persist() }
     fun remove(name: String) { _skills.value = _skills.value.filterNot { it.name == name && it.source != "built-in" }; persist() }
+
+    /**
+     * v0.10 (Hermes learning loop): the agent writes its OWN skills with the skill_create /
+     * skill_update tools. Learned skills live in the same folder format as imported ones, are
+     * tagged source = [LEARNED] so the UI can badge them, and are the only skills the agent may
+     * edit or delete — built-in and user-installed skills are never touched by the agent.
+     * [fullText] is the complete SKILL.md (front matter included). Returns the saved skill;
+     * throws with a plain message when the name clashes with a skill the agent does not own.
+     */
+    fun saveLearned(name: String, fullText: String, updating: Boolean): Skill {
+        val text = fullText.replace("\r\n", "\n").trim()
+        require(text.length >= 20) { "The skill is too short — write real instructions." }
+        val (parsedName, desc) = frontMatter(text, name)
+        val existing = _skills.value.firstOrNull { it.name.equals(parsedName, ignoreCase = true) }
+        if (existing != null && existing.source != LEARNED)
+            error("A skill named '${existing.name}' already exists and was not written by you (source: ${existing.source}). Pick a different name.")
+        if (existing == null && updating) error("No learned skill named '$parsedName' — create it with skill_create first.")
+        if (existing != null && !updating) error("You already wrote a skill named '$parsedName' — improve it with skill_update instead of creating a second one.")
+        val folder = File(dir, safe(parsedName)).apply { mkdirs() }
+        val file = File(folder, "SKILL.md"); file.writeText(text)
+        val skill = Skill(parsedName, desc, LEARNED, file.absolutePath, enabled = existing?.enabled ?: true)
+        _skills.value = _skills.value.filterNot { it.name.equals(parsedName, ignoreCase = true) } + skill
+        persist()
+        return skill
+    }
+
+    /** Deletes a skill ONLY when the agent itself wrote it (source = [LEARNED]). True when deleted. */
+    fun deleteLearned(name: String): Boolean {
+        val s = _skills.value.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return false
+        if (s.source != LEARNED) return false
+        _skills.value = _skills.value.filterNot { it.name == s.name }
+        runCatching { File(s.path).parentFile?.deleteRecursively() }
+        persist()
+        return true
+    }
+
+    fun isLearned(name: String): Boolean = _skills.value.firstOrNull { it.name.equals(name, ignoreCase = true) }?.source == LEARNED
     private fun persist() = index.writeText(json.encodeToString(kotlinx.serialization.builtins.ListSerializer(Skill.serializer()), _skills.value.filter { it.source != "built-in" }))
 
 
@@ -163,6 +200,8 @@ class SkillRepo(private val ctx: Context?, private val dir: File) {
     }
 
     companion object {
+        /** Source tag for skills the agent wrote itself (Settings → Skills shows them as "Learned"). */
+        const val LEARNED = "learned"
         val BUILT_IN = listOf("pdf", "website-audit", "deep-research", "roman-urdu", "video")
         fun frontMatter(text: String, fallback: String): Pair<String, String> {
             val fm = Regex("^---\\s*\\n(.*?)\\n---", RegexOption.DOT_MATCHES_ALL).find(text.trimStart())?.groupValues?.get(1).orEmpty()

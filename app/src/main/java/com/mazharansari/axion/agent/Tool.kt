@@ -29,7 +29,11 @@ interface Tool {
 class ToolContext(
     val workspace: Workspace,
     val skills: com.mazharansari.axion.skills.SkillRepo,
-    /** Live output for long commands (shown in the open Bash card). */
+    /** v0.10 learning loop: the agent-curated persistent memory (null in surfaces without it, e.g. live calls). */
+    val memory: com.mazharansari.axion.data.MemoryStore? = null,
+    /** v0.10 learning loop: saved conversations, for the session_search tool. */
+    val chats: com.mazharansari.axion.data.ConversationStore? = null,
+    /** Live output for long commands (shown in the open Bash card). Kept LAST: call sites pass it as a trailing lambda. */
     val progress: (String) -> Unit = {},
 )
 

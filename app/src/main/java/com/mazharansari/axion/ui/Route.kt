@@ -29,6 +29,8 @@ sealed interface Route {
     // v0.9
     data object Browser : Route
     data object Terminal : Route
+    // v0.10 — the learning loop
+    data object Memory : Route
 }
 
 /** v0.5.2: routes shown with FLAG_SECURE (a key, token or password can be typed or shown on them). */

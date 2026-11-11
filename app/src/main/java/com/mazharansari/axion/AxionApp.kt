@@ -37,6 +37,8 @@ class Graph(val app: Application) {
     val connectors by lazy { ConnectorRepo(app) }
     val workspace by lazy { Workspace(File(app.filesDir, "workspace")) }
     val skills by lazy { SkillRepo(app, File(app.filesDir, "skills")) }
+    /** v0.10: the learning loop's persistent memory (agent-curated; Settings → Memory shows it all). */
+    val memory by lazy { com.mazharansari.axion.data.MemoryStore(app) }
     val mcp by lazy { McpRepo(app.filesDir) }
     val speaker by lazy { Speaker(app) }
     val imageGen by lazy {

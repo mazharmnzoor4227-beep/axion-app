@@ -109,6 +109,36 @@ class ConversationStore(ctx: Context) {
         }
     }
 
+    /**
+     * v0.10 (Hermes learning loop): full-text search over every saved conversation — the agent's
+     * `session_search` tool. Every keyword must appear in a message; each hit carries an excerpt
+     * around the first matching keyword so the model can answer "what did we decide about …?"
+     * without loading whole chats. Newest conversations first.
+     */
+    suspend fun search(query: String, limit: Int = 8): List<ChatSearchHit> = withContext(Dispatchers.IO) {
+        val words = query.lowercase().split(Regex("\\s+")).filter { it.length > 1 }
+        if (words.isEmpty()) return@withContext emptyList()
+        val hits = mutableListOf<ChatSearchHit>()
+        val files = dir.listFiles { f -> f.extension == "json" }.orEmpty().sortedByDescending { it.lastModified() }
+        for (f in files) {
+            if (hits.size >= limit) break
+            val c = runCatching { json.decodeFromString<Conversation>(f.readText()) }.getOrNull() ?: continue
+            for (m in c.messages) {
+                if (hits.size >= limit) break
+                val text = m.text
+                if (text.isBlank()) continue
+                val lower = text.lowercase()
+                if (!words.all { it in lower }) continue
+                val at = words.map { lower.indexOf(it) }.filter { it >= 0 }.minOrNull() ?: 0
+                val from = (at - 90).coerceAtLeast(0)
+                val to = (at + 190).coerceAtMost(text.length)
+                hits += ChatSearchHit(c.id, c.title, c.updatedAt, m.role,
+                    (if (from > 0) "…" else "") + text.substring(from, to).replace('\n', ' ').trim() + if (to < text.length) "…" else "")
+            }
+        }
+        hits
+    }
+
     fun delete(id: String) { _index.value = _index.value.filterNot { it.id == id }; io.launch { File(dir, "$id.json").delete() } }
 
     fun rename(id: String, title: String) = io.launch { load(id)?.let { save(it.copy(title = title), true) } }
