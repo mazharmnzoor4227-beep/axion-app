@@ -47,7 +47,8 @@ sealed interface UpdateState {
 
 /** Pure parts (unit-tested on the JVM): feed parsing, version compare, hashes, the certificate rule. */
 object UpdateRules {
-    const val FEED = "https://claworabeauty.store/uploads/dl/axion/latest.json"
+    /** v0.9.3: the phone's app has checked this feed since 0.9.2 (and the PC agent publishes here); the repo feed carries the same releases. */
+    const val FEED = "https://axion.130-210-62-94.sslip.io/dl/latest.json"
     /** SHA-256 of Axion's release signing certificate. An update signed with any other key is refused. */
     const val CERT_SHA256 = "d064d58577350df28a532b83062e55a1ddc573799db702634af17fdc70c2e8c4"
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
