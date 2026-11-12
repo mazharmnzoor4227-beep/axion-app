@@ -112,7 +112,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.animation:animation")
     implementation("dev.chrisbanes.haze:haze-android:1.1.1")
-    implementation("com.alphacephei:vosk-android:0.3.75")   // Phase B wake word: offline grammar spotting (model downloads separately, not bundled)
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
@@ -129,6 +128,8 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")   // v0.4: Ubuntu base .tar.gz
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // v0.12 scheduler: WorkManager wakes the app for scheduled tasks (inexact on purpose — no exact-alarm permission).
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     // v0.5.3 sign-in: Firebase Authentication only (Google via Credential Manager, Email/Password, GitHub provider).
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))

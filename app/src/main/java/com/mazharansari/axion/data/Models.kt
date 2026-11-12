@@ -106,3 +106,12 @@ data class ConversationMeta(
     val preview: String = "",
     val section: String = "ask",
 )
+
+/** One match from [ConversationStore.search] (v0.10 session search): which chat, who said it, and the words around the match. */
+data class ChatSearchHit(
+    val conversationId: String,
+    val title: String,
+    val updatedAt: Long,
+    val role: Role,
+    val excerpt: String,
+)

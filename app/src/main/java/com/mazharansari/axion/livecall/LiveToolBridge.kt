@@ -8,18 +8,16 @@ import com.mazharansari.axion.agent.ToolContext
 import com.mazharansari.axion.agent.WebSearchTool
 import com.mazharansari.axion.agent.Workspace
 import com.mazharansari.axion.agent.clip
-import com.mazharansari.axion.phone.PhoneTools
 import com.mazharansari.axion.skills.SkillRepo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.json.JSONObject
 
 /**
- * v0.7.0: the Live call's hands. The SAME Tool objects the chat agent uses (web research + phone control),
+ * v0.7.0: the Live call's hands. The SAME Tool objects the chat agent uses (web research),
  * exposed to the Gemini Live model as function declarations and executed through the same code paths —
- * so the Tools-library switches, the phone consent, PhoneGate's tap-CONFIRM and the banking denylist all
- * apply in a call exactly as they do in chat. Plus one synthetic tool, end_call, which the session turns
- * into a hang-up after the model's spoken goodbye.
+ * so the Tools-library switches apply in a call exactly as they do in chat. Plus one synthetic tool,
+ * end_call, which the session turns into a hang-up after the model's spoken goodbye.
  *
  * Built by the call screen from the app graph; a null bridge (never built) leaves the call voice-only.
  */
@@ -43,13 +41,11 @@ class LiveToolBridge private constructor(
 
     companion object {
         /**
-         * The call's tool set: web group (when switched on) + phone group (only when [includePhone] —
-         * the caller has already checked consent + the Tools-library switch + the accessibility service)
-         * + end_call, always. ToolCatalog switches filter every group exactly as in chat.
+         * The call's tool set: web group (when switched on) + end_call, always.
+         * ToolCatalog switches filter every group exactly as in chat.
          */
-        fun build(workspace: Workspace, skills: SkillRepo, switches: Map<String, Boolean>, includePhone: Boolean): LiveToolBridge {
-            val candidates: List<Tool> = listOf(WebSearchTool(), BrowseTool(), HttpRequestTool()) +
-                if (includePhone) PhoneTools.all() else emptyList()
+        fun build(workspace: Workspace, skills: SkillRepo, switches: Map<String, Boolean>): LiveToolBridge {
+            val candidates: List<Tool> = listOf(WebSearchTool(), BrowseTool(), HttpRequestTool())
             val enabled = candidates.filter { ToolCatalog.isEnabled(it.spec.name, switches) }
             val declarations = enabled.map { tool ->
                 LiveCallProtocol.LiveToolDecl(

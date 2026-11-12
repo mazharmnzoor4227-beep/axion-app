@@ -20,7 +20,7 @@ object SecretScanner {
         Pattern("Anthropic key", Regex("""sk-ant-[A-Za-z0-9_\-]{20,}""")),
         Pattern("OpenRouter key", Regex("""sk-or-v1-[A-Za-z0-9]{20,}""")),
         Pattern("OpenAI-style key", Regex("""\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_\-]{24,}""")),
-        Pattern("ElevenLabs key", Regex("""\bsk_[a-f0-9]{40,}""")),
+        Pattern("sk_ API key", Regex("""\bsk_[a-f0-9]{40,}""")),
         Pattern("Google API key", Regex("""AIza[0-9A-Za-z_\-]{35}""")),
         Pattern("Google OAuth token", Regex("""\bya29\.[0-9A-Za-z_\-]{20,}""")),
         Pattern("Google refresh token", Regex("""\b1//0[0-9A-Za-z_\-]{30,}""")),

@@ -26,10 +26,17 @@ class WebSearchTool : Tool {
     override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput = withContext(Dispatchers.IO) {
         val q = args.s("query").orEmpty().ifBlank { return@withContext ToolOutput("Empty query", isError = true) }
         val n = (args.i("max_results") ?: 8).coerceIn(1, 15)
-        val results = runCatching { duck(q) }.getOrElse { emptyList() }.ifEmpty { runCatching { bing(q) }.getOrElse { emptyList() } }
+        val results = hits(q, n)
         if (results.isEmpty()) return@withContext ToolOutput("No results (search engines unreachable).", isError = true, doneTitle = "Search failed")
-        val text = results.take(n).mapIndexed { i, r -> "${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}" }.joinToString("\n")
+        val text = results.mapIndexed { i, r -> "${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}" }.joinToString("\n")
         ToolOutput(text, doneTitle = "Searched")
+    }
+
+    /** v0.11: structured hits for the deep-research pipeline — same engines, same DuckDuckGo → Bing fallback. */
+    suspend fun hits(query: String, max: Int): List<Hit> = withContext(Dispatchers.IO) {
+        val all = runCatching { duck(query) }.getOrElse { emptyList() }
+            .ifEmpty { runCatching { bing(query) }.getOrElse { emptyList() } }
+        all.take(max)
     }
 
     data class Hit(val title: String, val url: String, val snippet: String)

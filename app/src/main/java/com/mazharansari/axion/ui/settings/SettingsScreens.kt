@@ -9,7 +9,6 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings as AndroidSettings
 import androidx.core.app.NotificationManagerCompat
-import android.speech.tts.TextToSpeech
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -49,11 +48,6 @@ import com.mazharansari.axion.ui.home.FileActions
 import com.mazharansari.axion.ui.home.openFile
 import com.mazharansari.axion.ui.theme.P
 import com.mazharansari.axion.ui.theme.Type
-import com.mazharansari.axion.voice.ReadAloudPlayer
-import com.mazharansari.axion.voice.VoicePrefs
-import com.mazharansari.axion.voice.VoiceCatalog
-import com.mazharansari.axion.voice.VoiceFamily
-import com.mazharansari.axion.voice.AxVoice
 
 /** Grok settings page: #181818 page, left-aligned header, grouped #242424 tiles. */
 @Composable
@@ -76,6 +70,8 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
     val p = P
     val keys by vm.g.connectors.list.collectAsState()
     val skills by vm.g.skills.skills.collectAsState()
+    val memData by vm.g.memory.data.collectAsState()
+    val memCount = memData.user.size + memData.notes.size
     SettingsPage("Settings", back, close = true) {
         // profile card
         Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(p.card).clickable { nav(Route.Customize) }.padding(16.dp),
@@ -101,27 +97,9 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
                 Text(if (keys.isEmpty()) "Connect" else "Manage", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = Color.White)
             }
         }
-        // v0.5.3: Settings → Account — the signed-in user's photo, name and email (or "Sign in" for a guest).
-        val auth = remember { com.mazharansari.axion.auth.AuthHub.get(vm.getApplication()) }
-        if (auth.available) {
-            val au = auth.state.collectAsState().value.user
-            SectionLabel("Account")
-            Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(20.dp)).background(p.card).clickable { nav(Route.Account) }
-                .padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                com.mazharansari.axion.ui.auth.UserPhoto(au, 40.dp)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(au?.shownName ?: "Sign in", style = Type.row, color = p.text, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                    Text(au?.email ?: if (au == null) "Google, Email or GitHub" else "Signed in with ${au.provider.title}", style = Type.small, color = p.text2, maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                }
-                GkIcon(Gk.chevronRight, null, 20.dp, p.text3)
-            }
-        }
         SectionLabel("App")
         SettingsGroup {
             SettingsRow(Gk.theme, "Appearance", subtitle = s.theme.replaceFirstChar { it.uppercase() }) { nav(Route.Appearance) }
-            SettingsRow(Gk.haptics, "Haptics") { nav(Route.Haptics) }
             SettingsRow(Gk.language, "App Language", subtitle = s.appLanguage) { nav(Route.Language) }
             SettingsRow(Gk.sliders, "Advanced") { nav(Route.Advanced) }
         }
@@ -130,12 +108,15 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
             SettingsRow(Gk.wand, "Customize Axion") { nav(Route.Customize) }
             SettingsRow(Gk.connectors, "Connectors", subtitle = if (keys.isEmpty()) "None" else keys.joinToString(", ") { it.provider.name }.take(40)) { nav(Route.Connectors) }
             SettingsRow(Gk.skills, "Skills", subtitle = "${skills.count { it.enabled }} enabled") { nav(Route.Skills) }
+            SettingsRow(Gk.brain, "Memory", subtitle = memCount.let { if (it == 0) "What Axion remembers about you" else "$it saved" }) { nav(Route.Memory) }
+            SettingsRow(Gk.shield, "Approvals", subtitle = vm.g.approvals.rules.collectAsState().value.size.let { if (it == 0) "Commands Axion may run without asking" else "$it remembered" }) { nav(Route.Approvals) }
+            SettingsRow(Gk.clock, "Schedules", subtitle = vm.g.schedules.entries.collectAsState().value.count { it.enabled }.let { if (it == 0) "Tasks Axion runs on a schedule" else "$it active" }) { nav(Route.Schedules) }
             SettingsRow(Gk.tool, "Tools library", subtitle = com.mazharansari.axion.agent.ToolCatalog.groups.count { com.mazharansari.axion.agent.ToolCatalog.isEnabled(it, s.toolSwitches) }.let { "$it of ${com.mazharansari.axion.agent.ToolCatalog.groups.size} on" }) { nav(Route.ToolsLibrary) }   // axion-p3
-            SettingsRow(Gk.shield, "Phone control", subtitle = if (s.phoneConsent) "Allowed · red STOP button" else "Off · needs your permission") { nav(Route.PhoneControl) }
+            SettingsRow(Gk.globe, "Browser", subtitle = "Axion's own — real pages, forms, screenshots") { nav(Route.Browser) }
+            SettingsRow(Gk.terminal, "Terminal", subtitle = "Linux shell — run commands yourself") { nav(Route.Terminal) }
             SettingsRow(Gk.terminal, "Developer tools", subtitle = "Linux · Python, Node, C++, PHP…") { nav(Route.DevTools) }
             SettingsRow(Gk.rocket, "Antigravity", subtitle = vm.g.agy.store.collectAsState().value.accounts.size.let { if (it == 0) "Multi-account, auto-switch" else "$it account${if (it > 1) "s" else ""}" }) { nav(Route.Antigravity) }
             SettingsRow(Gk.usage, "Quota", subtitle = "Used, left and reset times") { nav(Route.Quota) }
-            SettingsRow(Gk.voice, "Voice") { nav(Route.Voice) }
         }
         SectionLabel("Data & Information")
         SettingsGroup {
@@ -153,7 +134,7 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
     }
 }
 
-/** Grok Appearance (frame 0:05): theme tiles (selected = white tile, black glyph) + a Text size card with live preview. */
+/** Grok Appearance (frame 0:05): theme tiles (selected = white tile, black glyph). */
 @Composable
 fun AppearanceScreen(vm: ChatViewModel, back: () -> Unit) {
     val s = settingsOf(vm); val p = P
@@ -169,34 +150,6 @@ fun AppearanceScreen(vm: ChatViewModel, back: () -> Unit) {
                     Text(label, style = Type.body.copy(fontSize = 16.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium), color = if (sel) p.text else p.text2)
                 }
             }
-        }
-        SectionLabel("Text size")
-        Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(p.card).padding(horizontal = 16.dp, vertical = 18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Slider(s.textScale, { v -> vm.g.settings.update { it.copy(textScale = (Math.round(v * 20) / 20f)) } }, valueRange = 0.85f..1.3f,
-                    modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent, inactiveTrackColor = p.page2, activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
-            }
-            Spacer(Modifier.height(18.dp))
-            Box(Modifier.align(Alignment.End).clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)).background(p.page2).padding(horizontal = 16.dp, vertical = 11.dp)) {
-                Text("What should we work on today?", style = Type.body, color = p.text)
-            }
-            Spacer(Modifier.height(14.dp))
-            Text("Hi! I'm Axion. What can I help you with?", style = Type.body, color = p.text)
-            Spacer(Modifier.height(18.dp))
-            Text("Reset", style = Type.body.copy(fontWeight = FontWeight.SemiBold), color = p.text, modifier = Modifier.align(Alignment.CenterHorizontally).clip(RoundedCornerShape(50)).clickable { vm.g.settings.update { it.copy(textScale = 1f) } }.padding(horizontal = 16.dp, vertical = 6.dp))
-        }
-    }
-}
-
-@Composable
-fun HapticsScreen(vm: ChatViewModel, back: () -> Unit) {
-    val s = settingsOf(vm)
-    SettingsPage("Haptics", back) {
-        Spacer(Modifier.height(8.dp))
-        SettingsGroup {
-            ToggleRow(Gk.haptics, "Haptic feedback", "Light taps on buttons", s.haptics) { v -> vm.g.settings.update { it.copy(haptics = v) } }
-            ToggleRow(Gk.voice, "While streaming", "Subtle ticks as answers arrive", s.hapticsStreaming) { v -> vm.g.settings.update { it.copy(hapticsStreaming = v) } }
         }
     }
 }
@@ -223,7 +176,21 @@ fun LanguageScreen(vm: ChatViewModel, back: () -> Unit) {
 @Composable
 fun AdvancedScreen(vm: ChatViewModel, back: () -> Unit) {
     val s = settingsOf(vm)
+    val ctx = LocalContext.current
     SettingsPage("Advanced", back) {
+        SectionLabel("Assistant")
+        SettingsGroup {
+            // Phase F (v0.8.5): assistant announcements — Android itself must grant Notification access first; the toggle opens that system page when access is missing.
+            val notifAccess = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+            ToggleRow(Gk.bell, "Assistant announcements", if (!notifAccess) "Reads new WhatsApp / Telegram messages aloud — tap to grant Notification access first" else if (s.assistantAnnounce) "On: new messages are read aloud as they arrive" else "Off: read new WhatsApp / Telegram messages aloud as they arrive", s.assistantAnnounce && notifAccess) { v ->
+                if (v && !notifAccess) {
+                    runCatching { ctx.startActivity(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                } else {
+                    vm.g.settings.update { it.copy(assistantAnnounce = v) }
+                    if (!v) com.mazharansari.axion.assistant.AssistantAnnouncer.stop()
+                }
+            }
+        }
         SectionLabel("Paste as File")
         SettingsGroup {
             listOf("Always ask", "Always", "Never").forEach { l ->
@@ -263,160 +230,6 @@ fun CustomizeScreen(vm: ChatViewModel, back: () -> Unit) {
         }
     }
 }
-
-/**
- * Voice (v0.3) — Axion's own Grok-style Voice Library page (orb on top, voices as tiles), now holding ONLY the voices
- * mazhar asked for: Kodex's six Google voices (same names, same order, same default: Rounded at Normal pace) and the
- * free natural voices that passed testing. Every tap speaks through ReadAloudPlayer — the same path as read-aloud
- * and the Live call — so what he hears here is exactly what he'll hear everywhere.
- */
-@Composable
-fun VoiceScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit = {}) {
-    val s = settingsOf(vm); val p = P
-    val ctx = LocalContext.current
-    val prefs = remember { VoicePrefs.prefs(ctx) }
-    var installed by remember { mutableStateOf<Set<String>?>(null) }
-    DisposableEffect(Unit) {
-        var engine: TextToSpeech? = null
-        val listener = TextToSpeech.OnInitListener { st ->
-            if (st == TextToSpeech.SUCCESS) installed = runCatching { engine?.voices?.filter { v -> !v.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }?.map { it.name }?.toSet() }.getOrNull() ?: emptySet()
-            else installed = emptySet()
-        }
-        engine = if (ReadAloudPlayer.hasGoogleTts(ctx)) TextToSpeech(ctx, listener, ReadAloudPlayer.GOOGLE_TTS) else TextToSpeech(ctx, listener)
-        onDispose { runCatching { engine?.shutdown() }; if (ReadAloudPlayer.playingMessageId == TEST_ID) ReadAloudPlayer.stop() }
-    }
-    var active by remember { mutableStateOf(VoicePrefs.activeVoice(ctx).id) }
-    var pace by remember { mutableFloatStateOf(VoicePrefs.pace(ctx)) }
-    var smart by remember { mutableStateOf(VoicePrefs.smartUrdu(ctx)) }
-    var paceOpen by remember { mutableStateOf(false) }
-    var elOpen by remember { mutableStateOf(false) }
-    val testing = ReadAloudPlayer.playingMessageId == TEST_ID
-    fun preview(v: AxVoice = VoiceCatalog.byId(active)) {
-        ReadAloudPlayer.stop()
-        val text = if (v.family == VoiceFamily.NATURAL && v.engineVoice.startsWith("ur-")) "السلام علیکم! میں آپ کا ایکسیون ہوں۔ پوچھیں، کیا جاننا ہے؟"
-            else if (v.family == VoiceFamily.NATURAL && v.engineVoice.startsWith("hi-")) VoiceCatalog.PREVIEW_URDU
-            else VoiceCatalog.PREVIEW_TEXT
-        ReadAloudPlayer.speak(ctx, TEST_ID, text)
-    }
-    val hasGemini = vm.g.connectors.list.collectAsState().value.any { it.enabled && it.providerId == "gemini" }
-    fun choose(v: AxVoice) { active = v.id; VoicePrefs.setActive(ctx, v.id); preview(v) }
-    fun kodexAvailable(v: AxVoice): Boolean? = installed?.let { set -> set.isEmpty() || v.engineVoice in set || v.engineVoice.replace("-network", "-local") in set }
-
-    Column(Modifier.fillMaxSize().background(p.page2)) {
-        ScreenHeader("Voice Library", back)
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 32.dp)) {
-            item { Box(Modifier.fillMaxWidth().height(184.dp), contentAlignment = Alignment.Center) { Orb(120.dp) } }
-            item {
-                Text("Choose the voice Axion uses for read-aloud and Live calls. Tap a voice to make it active.",
-                    style = Type.small.copy(fontSize = 15.sp, lineHeight = 21.sp), color = p.text2, modifier = Modifier.padding(start = 30.dp, end = 24.dp, bottom = 12.dp))
-                SettingsGroup {
-                    SettingsRow(Gk.voice, "Active voice", subtitle = VoiceCatalog.byId(active).let { "${it.name} · ${it.language}" }, chevron = false,
-                        trailing = { Pill(if (testing) "Stop test" else "Test voice", icon = if (testing) Gk.stop else Gk.speaker) { if (testing) ReadAloudPlayer.stop() else preview() } }) { if (testing) ReadAloudPlayer.stop() else preview() }
-                    SettingsRow(Gk.clock, "Pace", subtitle = VoiceCatalog.PACES.minBy { kotlin.math.abs(it.second - pace) }.first) { paceOpen = true }
-                    // v0.3.1: the same speed the read-aloud pill's "1x" list sets (Grok keeps it for the next message too).
-                    var rspeed by remember { mutableFloatStateOf(VoicePrefs.speed(ctx)) }
-                    SettingsRow(Gk.sliders, "Read-aloud speed", subtitle = com.mazharansari.axion.ui.chat.speedLabel(rspeed) + " · tap to change, or use the 1x button on the player") {
-                        val list = VoicePrefs.SPEEDS; val next = list[(list.indexOf(rspeed).coerceAtLeast(0) + 1) % list.size]
-                        rspeed = next; ReadAloudPlayer.setSpeed(ctx, next)
-                    }
-                    ToggleRow(Gk.speaker, "Read answers aloud", "Speak every reply when it finishes", s.autoRead) { v -> vm.g.settings.update { it.copy(autoRead = v) } }
-                    // Phase B: wake word — the microphone foreground service runs only while this is on (needs the mic permission, already used by voice input).
-                    ToggleRow(Gk.mic, "Wake word — “Hey Axion”", if (s.wakeWordEnabled) "On: listening in the background; saying Hey Axion opens a Live call" else "Off: say Hey Axion anywhere to open a Live call (uses the microphone in the background)", s.wakeWordEnabled) { v ->
-                        vm.g.settings.update { it.copy(wakeWordEnabled = v) }
-                        if (v) com.mazharansari.axion.wakeword.WakeWordService.start(ctx) else com.mazharansari.axion.wakeword.WakeWordService.stop(ctx)
-                    }
-                    // Phase F (v0.8.5): assistant announcements — Android itself must grant Notification access first; the toggle opens that system page when access is missing.
-                    val notifAccess = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
-                    ToggleRow(Gk.bell, "Assistant announcements", if (!notifAccess) "Reads new WhatsApp / Telegram messages aloud — tap to grant Notification access first" else if (s.assistantAnnounce) "On: new messages are read aloud as they arrive" else "Off: read new WhatsApp / Telegram messages aloud as they arrive", s.assistantAnnounce && notifAccess) { v ->
-                        if (v && !notifAccess) {
-                            runCatching { ctx.startActivity(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        } else {
-                            vm.g.settings.update { it.copy(assistantAnnounce = v) }
-                            if (!v) com.mazharansari.axion.assistant.AssistantAnnouncer.stop()
-                        }
-                    }
-                    // Phase F (v0.8.7): the floating character — the owner's main surface; its window rides the Accessibility service.
-                    ToggleRow(Gk.gem, "Assistant character", if (s.assistantOrb) "On: a small ball rests in a corner of your home screen — tap it to talk, call “Hey Axion” and it comes forward; it grows while working and shows faces for every mood (needs Accessibility on)" else "Off: Axion's character never appears", s.assistantOrb) { v ->
-                        vm.g.settings.update { it.copy(assistantOrb = v) }
-                        com.mazharansari.axion.assistant.AssistantOrb.setEnabled(v)
-                    }
-                    var ownCall by remember { mutableStateOf(VoicePrefs.callOwnVoice(ctx)) }
-                    ToggleRow(Gk.phone, "Use my chosen voice in calls (a bit slower)", if (ownCall) "On: Gemini Live listens, ${VoiceCatalog.byId(active).name} speaks (≈1 s slower)" else "Off: fast live call in a Gemini voice (${VoiceCatalog.geminiTwin(VoiceCatalog.byId(active)).name})", ownCall) { v ->
-                        ownCall = v; VoicePrefs.setCallOwnVoice(ctx, v)
-                    }
-                    SettingsRow(Gk.phone, "Live call", subtitle = VoiceCatalog.byId(active).let { v ->
-                        when { v.family == VoiceFamily.GEMINI && hasGemini -> "${v.name} · Gemini Live, real-time"; hasGemini && ownCall -> "${v.name} · Live + your voice (slower)"; hasGemini -> "Live, real-time · ${VoiceCatalog.geminiTwin(v).name} voice"; else -> "Add a free Gemini key for a live call" } }) { nav(Route.VoiceCall) }
-                }
-                SectionLabel("Phone voices")
-            }
-            item { SettingsGroup { VoiceCatalog.kodex.forEach { v ->
-                val ok = kodexAvailable(v)
-                VoiceTile(v.name, v.language + " · " + (if (ok == false) "install Speech Services by Google" else v.tag), active == v.id, dim = ok == false) { choose(v) }
-            } } }
-            item {
-                SectionLabel("Natural voices · free, needs internet")
-                SettingsGroup {
-                    ToggleRow(Gk.globe, "Smart Urdu (off = your voice reads everything)", "On: Urdu script → Uzma/Asad, Roman Urdu → Swara/Madhur", smart) { v ->
-                        smart = v; prefs.edit().putBoolean(VoicePrefs.KEY_SMART_URDU, v).apply()
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-            item { SettingsGroup { VoiceCatalog.natural.forEach { v -> VoiceTile(v.name, "${v.language} · ${v.tag}", active == v.id) { choose(v) } } } }
-            item { SectionLabel(if (hasGemini) "Gemini voices · native live calls" else "Gemini voices · add a Gemini key in Connectors") }
-            item { SettingsGroup { VoiceCatalog.gemini.forEach { v -> VoiceTile(v.name, "${v.tag} · speaks any language", active == v.id, dim = !hasGemini) { choose(v) } } } }
-            item {
-                SectionLabel("Premium")
-                SettingsGroup {
-                    VoiceTile("ElevenLabs", if (VoicePrefs.secret(ctx, "elevenlabs") != null) "Your own key · tap to edit" else "Bring your own ElevenLabs key + Voice ID", active == VoiceCatalog.elevenLabs.id) { elOpen = true }
-                }
-            }
-        }
-    }
-    if (paceOpen) com.mazharansari.axion.ui.chat.AxionSheet({ paceOpen = false }) {
-        Text("Pace", style = Type.header.copy(fontSize = 18.sp), color = p.text, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
-        VoiceCatalog.PACES.forEach { (label, rate) ->
-            com.mazharansari.axion.ui.chat.SheetRow(Gk.clock, label, null, onClick = {
-                pace = rate; prefs.edit().putFloat(VoicePrefs.KEY_PACE, rate).apply(); paceOpen = false; preview()
-            }) { Check(kotlin.math.abs(pace - rate) < 0.04f) }
-        }
-    }
-    if (elOpen) {
-        var key by remember { mutableStateOf("") }; var id by remember { mutableStateOf(VoicePrefs.secret(ctx, "elevenlabs_voice").orEmpty()) }
-        com.mazharansari.axion.ui.chat.AxionSheet({ elOpen = false }) {
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("ElevenLabs", style = Type.header, color = p.text)
-                Text("Optional. Your key and Voice ID stay encrypted on this phone.", style = Type.small, color = p.text2)
-                Field("API key", key, { key = it }, if (VoicePrefs.secret(ctx, "elevenlabs") != null) "Saved — paste to replace" else "sk_…")
-                Field("Voice ID", id, { id = it }, "e.g. 21m00Tcm4TlvDq8ikWAM")
-                Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(50)).background(p.accent).clickable {
-                    if (key.isNotBlank()) VoicePrefs.setSecret(ctx, "elevenlabs", key)
-                    VoicePrefs.setSecret(ctx, "elevenlabs_voice", id)
-                    elOpen = false
-                    if (VoicePrefs.secret(ctx, "elevenlabs") != null && id.isNotBlank()) choose(VoiceCatalog.elevenLabs) else vm.toast = "Add both the key and a Voice ID"
-                }, contentAlignment = Alignment.Center) { Text("Use ElevenLabs", style = Type.label, color = p.onAccent) }
-            }
-        }
-    }
-}
-
-private const val TEST_ID = "axion-voice-test"
-
-fun callModeLabel(mode: String?) = if (mode == "gemini") "Gemini Live · real-time, Gemini's own voice" else "Same voice as read-aloud"
-
-@Composable
-private fun VoiceTile(title: String, tag: String, selected: Boolean, dim: Boolean = false, onClick: () -> Unit) {
-    val p = P
-    Row(Modifier.fillMaxWidth().height(74.dp).clip(RoundedCornerShape(6.dp)).background(if (selected) (if (p.isDark) Color(0xFF2F2F2F) else p.border) else p.card)
-        .clickable(onClick = onClick).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = Type.row, color = if (dim) p.text3 else p.text, maxLines = 1)
-            Text(tag, style = Type.small.copy(fontSize = 15.sp), color = p.text2, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-        }
-        Check(selected)
-    }
-}
-
 
 /**
  * The orb, redrawn 2026-11-06 to the owner's 2026-11-03 choice: the two thinking-orbs he circled on the
@@ -493,11 +306,9 @@ fun AboutScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit = {}) 
         }
         SectionLabel("Updates")
         UpdateCard(vm)
-        SectionLabel("Privacy and security")
+        Text("Your keys and chats stay on this phone; messages go only to the AI providers you connect.",
+            style = Type.small.copy(fontSize = 15.sp, lineHeight = 21.sp), color = p.text2, modifier = Modifier.padding(start = 30.dp, end = 24.dp, top = 8.dp, bottom = 14.dp))
         SettingsGroup {
-            SettingsRow(Gk.shield, "Privacy Policy", subtitle = "What's stored on this phone, what's sent where") { nav(Route.Privacy) }
-            SettingsRow(Gk.key, "Security", subtitle = "How your keys and tokens are protected") { nav(Route.Security) }
-            SettingsRow(Gk.info, "Terms of Use") { nav(Route.Terms) }
             SettingsRow(Gk.trash, "Delete all data", subtitle = "Keys, tokens, chats, projects, Linux — everything", chevron = false, titleColor = p.danger, iconTint = p.danger) { deleteAll = true }
         }
         SectionLabel("Legal")

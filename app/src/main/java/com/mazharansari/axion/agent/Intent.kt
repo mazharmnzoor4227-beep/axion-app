@@ -94,17 +94,28 @@ object IntentGate {
     }
 
     /** Tool names each intent may see. */
-    val lookupTools = setOf("web_search", "browse_url", "http_request")
+    val lookupTools = setOf(
+        "web_search", "browse_url", "http_request",
+        // v0.9: the agent's own browser belongs in chat/lookup too — "browser kholo, research karke batao" must work here
+        "browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll",
+        "browser_back", "browser_forward", "browser_reload", "browser_search", "browser_screenshot",
+        // v0.10: memory is conversational — "ye yaad rakhna", "mera naam … hai", "last time hum ne kya decide kiya tha"
+        // must work in plain chat, not only in ACTION turns. Skill writing stays ACTION-only (creating things).
+        "memory_add", "memory_replace", "memory_remove", "memory_read", "session_search",
+        // v0.11: deep research is a chat request too ("is par research karke batao") — not just an ACTION verb.
+        "deep_research",
+        // v0.12: scheduling is conversational too ("kal 9 baje yaad dilana…", "roz sham ko…") — it must
+        // work in plain chat, not only in ACTION turns.
+        "schedule_create", "schedule_list", "schedule_delete",
+    )
 
-    /** The phone tools (ToolCatalog "phone" group) — kept in step with ToolCatalog by UnifiedToolsTest. */
-    val phoneTools = setOf("phone_screen", "phone_open_app", "phone_tap", "phone_type", "phone_scroll", "phone_back", "phone_home", "phone_wait")
 
     /**
      * v0.7.0 (owner: "ask ho ya build, jo bolun wo ho jaye"): what a conversation or lookup turn may use —
-     * the web plus the phone. The v0.3 gate kept every tool out of CHAT, so a plainly-worded request in chat
+     * the web. The v0.3 gate kept every tool out of CHAT, so a plainly-worded request in chat
      * ("browser kholo, research karke batao") could never act; now the label only changes the prompt and the
      * effort, not the capability. File/command work still needs an ACTION turn, and small talk still gets
      * no tools at all (greetings stay instant and cheap).
      */
-    val chatTools = lookupTools + phoneTools
+    val chatTools = lookupTools
 }

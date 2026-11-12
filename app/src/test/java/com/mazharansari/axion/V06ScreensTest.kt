@@ -21,7 +21,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
-/** v0.6 Phase 3: Tools library + Phone control permission screen, rendered at mazhar's screen size. */
+/** v0.6 Phase 3: Tools library, rendered at mazhar's screen size. */
 @OptIn(ExperimentalRoborazziApi::class, ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -50,7 +50,7 @@ class V06ScreensTest {
     @Test fun toolsLibraryShowsEveryToolAndTheSwitchWorks() {
         val (sc, vm) = launch(Route.ToolsLibrary)
         compose.onNodeWithText("Tools library").assertExists()
-        listOf("Web search & pages", "Files & workspace", "PDF reports", "Image generation", "Video editing", "Run commands", "Skills", "Connectors (MCP)", "Phone control").forEach { compose.onAllNodesWithText(it).onFirst().assertExists() }
+        listOf("Web search & pages", "Files & workspace", "PDF reports", "Image generation", "Video editing", "Run commands", "Skills", "Connectors (MCP)").forEach { compose.onAllNodesWithText(it).onFirst().assertExists() }
         cap("01_tools_library")
         compose.onNodeWithText("PDF reports").performClick(); compose.mainClock.advanceTimeBy(500)
         assertEquals(false, vm.g.settings.state.value.toolSwitches["documents"])
@@ -59,21 +59,5 @@ class V06ScreensTest {
         sc.close()
     }
 
-    @Test fun phoneControlNeedsExplicitPermissionFirst() {
-        val (sc, vm) = launch(Route.PhoneControl)
-        compose.onAllNodesWithText("Phone control").onFirst().assertExists()
-        compose.onNodeWithText("Open Accessibility settings").assertExists()
-        compose.onNodeWithText("I understand — allow phone control").assertExists()
-        assertFalse(vm.g.settings.state.value.phoneConsent)
-        cap("02_phone_control_permission")
-        scrollTo("I understand — allow phone control"); compose.onNodeWithText("I understand — allow phone control").performClick(); compose.mainClock.advanceTimeBy(500)
-        compose.mainClock.advanceTimeBy(1500);         compose.onNodeWithText("Allow phone control?").assertExists()
-        compose.onNodeWithText("Cancel").performClick(); compose.mainClock.advanceTimeBy(500)
-        assertFalse(vm.g.settings.state.value.phoneConsent)               // cancelling grants nothing
-        scrollTo("I understand — allow phone control"); compose.onNodeWithText("I understand — allow phone control").performClick(); compose.mainClock.advanceTimeBy(500)
-        compose.onNodeWithText("Allow").performClick(); compose.mainClock.advanceTimeBy(500)
-        assertTrue(vm.g.settings.state.value.phoneConsent); assertEquals(true, vm.g.settings.state.value.toolSwitches["phone"])
-        cap("03_phone_control_allowed")
-        sc.close()
-    }
+
 }

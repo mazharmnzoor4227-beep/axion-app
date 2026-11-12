@@ -46,6 +46,10 @@ fun Composer(
     onMicCancel: () -> Unit = onMic,
     /** v0.5.2 speed: the field got focus or the first character was typed — warm up the connection. */
     onFocus: () -> Unit = {},
+    /** v0.11: Deep Research toggle chip, shown in the Ask composer only (null = hidden; Build / Imagine pass nothing). */
+    researchOn: Boolean? = null, onResearch: () -> Unit = {},
+    /** v0.12: Long task toggle chip, same deal — Ask composer only. */
+    longTaskOn: Boolean? = null, onLongTask: () -> Unit = {},
 ) {
     val p = P
     val shape = RoundedCornerShape(if (compact) 28.dp else 20.dp)
@@ -83,6 +87,8 @@ fun Composer(
             RoundTool(if (plusOpen) Gk.close else Gk.plus, "Attach", onPlus)
             Spacer(Modifier.width(6.dp))
             ModeChip(modeLabel, modeOpen, onMode)
+            if (researchOn != null) { Spacer(Modifier.width(6.dp)); ResearchChip(researchOn, onResearch) }
+            if (longTaskOn != null) { Spacer(Modifier.width(6.dp)); LongTaskChip(longTaskOn, onLongTask) }
             Spacer(Modifier.weight(1f))
             val state = when { running -> 2; text.isNotBlank() || attachments.isNotEmpty() -> 1; else -> 0 }
             AnimatedVisibility(!running, enter = fadeIn(tween(120)), exit = fadeOut(tween(120))) {
@@ -129,6 +135,30 @@ private fun ModeChip(label: String, open: Boolean, onClick: () -> Unit) {
 }
 
 fun modeIcon(label: String) = when (label) { "Fast" -> Gk.bolt; "Expert" -> Gk.think; "Heavy" -> Gk.connectors; "Build" -> Gk.hammer; else -> Gk.rocket }
+
+/** v0.11: the Deep Research toggle — filled with the accent colour while on, so the mode is visible at a glance. */
+@Composable
+private fun ResearchChip(on: Boolean, onClick: () -> Unit) {
+    val p = P; val tap = rememberTap(onClick)
+    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(if (on) p.accent else p.chip).clickable(onClick = tap).padding(start = 12.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        GkIcon(Gk.search, null, 17.dp, if (on) p.onAccent else p.text2)
+        Spacer(Modifier.width(6.dp))
+        Text("Research", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = if (on) p.onAccent else p.text)
+    }
+}
+
+/** v0.12: the Long task toggle — same chip family as Research: accent-filled while on. */
+@Composable
+private fun LongTaskChip(on: Boolean, onClick: () -> Unit) {
+    val p = P; val tap = rememberTap(onClick)
+    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(if (on) p.accent else p.chip).clickable(onClick = tap).padding(start = 12.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        GkIcon(Gk.clock, null, 17.dp, if (on) p.onAccent else p.text2)
+        Spacer(Modifier.width(6.dp))
+        Text("Long task", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = if (on) p.onAccent else p.text)
+    }
+}
 
 /** 0 = Speak pill (empty, opens voice), 1 = send ↑, 2 = stop ■, 3 = disabled send (Build). */
 @Composable

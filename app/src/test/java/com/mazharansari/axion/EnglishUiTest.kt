@@ -15,7 +15,7 @@ class EnglishUiTest {
     private val literal = Regex("\"((?:[^\"\\\\\\n]|\\\\.)*)\"")
     private val tripleQuoted = Regex("\"\"\"([\\s\\S]*?)\"\"\"")
     /** Model prompts and the user-input matcher — not UI. */
-    private val notUi = setOf("agent/Intent.kt", "agent/Agent.kt", "build/BuildPrompts.kt", "agent/HistoryCompressor.kt", "agent/Planning.kt", "phone/PhoneSafety.kt", "assistant/NotifyInbox.kt")   // pattern lists that recognise Roman-Urdu user input (or on-screen phone text), not UI text; NotifyInbox builds the assistant's SPOKEN announcements, which speak the owner's language by his own brief — also not UI text
+    private val notUi = setOf("agent/Intent.kt", "agent/Agent.kt", "build/BuildPrompts.kt", "agent/HistoryCompressor.kt", "agent/Planning.kt", "assistant/NotifyInbox.kt")   // pattern lists that recognise Roman-Urdu user input (or on-screen phone text), not UI text; NotifyInbox builds the assistant's SPOKEN announcements, which speak the owner's language by his own brief — also not UI text
 
     private fun root(): File = listOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
 

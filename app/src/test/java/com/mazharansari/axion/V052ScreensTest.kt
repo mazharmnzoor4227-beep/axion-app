@@ -92,19 +92,6 @@ class V052ScreensTest {
         scrollTo("Delete all data"); cap("01_about_privacy_security"); sc.close()
     }
 
-    @Test fun privacyPolicy() {
-        seed(); val (sc, _) = launch { it.debugStart = Route.Privacy }
-        cap("02_privacy_policy_top")
-        scrollTo("What Axion does NOT do"); cap("02b_privacy_policy_not_do"); sc.close()
-    }
-
-    @Test fun securityPage() {
-        seed(); val (sc, _) = launch { it.debugStart = Route.Security }
-        cap("03_security_top"); scrollTo("Build agent, Linux"); cap("03b_security_build_agent"); sc.close()
-    }
-
-    @Test fun termsPage() { seed(); val (sc, _) = launch { it.debugStart = Route.Terms }; cap("04_terms_of_use"); sc.close() }
-
     // Robolectric never goes idle with a text field inside a dialog window, so the renders draw the same field as text.
     @Test fun deleteAllDialog() {
         seed(); val (sc, _) = launch { it.debugStart = Route.About; it.debugDeleteAll = true; it.debugNoClear = true; it.debugNoField = true }

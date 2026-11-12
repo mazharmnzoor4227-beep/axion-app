@@ -19,15 +19,15 @@ class AxionApp : Application() {
         if (BuildConfig.DEBUG) android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().detectNetwork().penaltyLog().build())
         com.mazharansari.axion.voice.VoicePrefs.migrate(this); graph = Graph(this)
         com.mazharansari.axion.linux.LinuxHub.graph = graph
+        com.mazharansari.axion.browser.BrowserHub.graph = graph
         com.mazharansari.axion.local.LocalEngine.libDir = applicationInfo.nativeLibraryDir.orEmpty()   // null under Robolectric
         Thread { runCatching { graph.quota } }.start()   // opens usage.db, restores key cool-downs, hooks rate-limit headers
+        Thread { runCatching { com.mazharansari.axion.work.ScheduleEngine.armAll(this, graph.schedules) } }.start()   // v0.12: re-arm schedules
         // v0.5.2 security: the scanner knows the user's own keys/tokens (so even shapeless tokens are caught), and any
         // Antigravity sign-in files left readable (an older version, a run cut off by a crash) are encrypted again.
         com.mazharansari.axion.security.SecretScanner.known = { graph.knownSecrets() }
         Thread { runCatching { graph.agy.sealAtRest() }; runCatching { graph.knownSecrets() } }.start()
         com.mazharansari.axion.voice.ReadAloudPlayer.geminiKeys = { graph.geminiKeys() }
-        // Phase B: if the owner left the wake word on, resume listening after a restart/reboot of the process.
-        Thread { runCatching { if (graph.settings.state.value.wakeWordEnabled) com.mazharansari.axion.wakeword.WakeWordService.start(this) } }.start()
     }
 }
 
@@ -38,6 +38,14 @@ class Graph(val app: Application) {
     val connectors by lazy { ConnectorRepo(app) }
     val workspace by lazy { Workspace(File(app.filesDir, "workspace")) }
     val skills by lazy { SkillRepo(app, File(app.filesDir, "skills")) }
+    /** v0.10: the learning loop's persistent memory (agent-curated; Settings → Memory shows it all). */
+    val memory by lazy { com.mazharansari.axion.data.MemoryStore(app) }
+    /** v0.12: remembered approvals for gated shell work (Settings → Approvals shows/revokes them). */
+    val approvals by lazy { com.mazharansari.axion.data.ApprovalsStore(app) }
+    /** v0.12: the in-flight long-task record, so an app kill mid-task is visible on the next start. */
+    val taskRuns by lazy { com.mazharansari.axion.data.TaskRunStore(app) }
+    /** v0.12: scheduled tasks (Hermes-style) — created by the agent, run headlessly by WorkManager. */
+    val schedules by lazy { com.mazharansari.axion.data.SchedulesStore(app) }
     val mcp by lazy { McpRepo(app.filesDir) }
     val speaker by lazy { Speaker(app) }
     val imageGen by lazy {
@@ -52,6 +60,11 @@ class Graph(val app: Application) {
     // v0.4 — Linux (PRoot), developer tools, Antigravity accounts, quota.
     val linux by lazy { com.mazharansari.axion.linux.LinuxRuntime(app) }
     val devtools by lazy { com.mazharansari.axion.linux.DevTools(app, linux) }
+    // v0.9 — Axion's own browser (one shared WebView for the Browser screen + the agent) and the terminal:
+    // one persistent shell session + background jobs, both on the same PRoot Ubuntu.
+    val browser by lazy { com.mazharansari.axion.browser.BrowserController(app) }
+    val shell by lazy { com.mazharansari.axion.linux.ShellSession(linux) }
+    val jobs by lazy { com.mazharansari.axion.linux.BackgroundJobs(app, linux) }
     val agy by lazy { com.mazharansari.axion.antigravity.AgyAccounts(app) }
     val agyLogin by lazy { com.mazharansari.axion.antigravity.AgyLogin(linux, agy) }
     val quota by lazy {

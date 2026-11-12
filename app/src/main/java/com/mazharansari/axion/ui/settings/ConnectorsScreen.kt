@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -295,6 +296,7 @@ fun SkillsScreen(vm: ChatViewModel, back: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
     var found by remember { mutableStateOf<List<SkillRepo.Found>>(emptyList()) }
+    var viewing by remember { mutableStateOf<com.mazharansari.axion.skills.Skill?>(null) }
     val picked = remember { mutableStateMapOf<String, Boolean>() }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val upload = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -352,15 +354,36 @@ fun SkillsScreen(vm: ChatViewModel, back: () -> Unit) {
             }
             item { SectionLabel("Installed") }
             items(skills, key = { "s_" + it.name }) { s ->
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface).padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                val learned = s.source == SkillRepo.LEARNED
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface)
+                    .then(if (learned) Modifier.clickable { viewing = s } else Modifier)
+                    .padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     GkIcon(Gk.skills, null, 22.dp, p.text); Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(s.name + if (s.source == "built-in") "  · built-in" else "", style = Type.label, color = p.text)
-                        Text(s.description, style = Type.small, color = p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(s.name + when { s.source == "built-in" -> "  · built-in"; learned -> "  · Learned"; else -> "" }, style = Type.label, color = p.text)
+                        Text(s.description + if (learned) "  (tap to read or delete)" else "", style = Type.small, color = p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     Switch(s.enabled, { vm.g.skills.setEnabled(s.name, it) }, colors = SwitchDefaults.colors(checkedThumbColor = p.onAccent, checkedTrackColor = p.accent, uncheckedThumbColor = p.text2, uncheckedTrackColor = p.surface2, uncheckedBorderColor = p.border))
                 }
             }
         }
+    }
+
+    // v0.10: a learned skill can be read in full and deleted by the user.
+    viewing?.let { s ->
+        val body = remember(s.name) { vm.g.skills.body(s.name).orEmpty() }
+        AlertDialog(onDismissRequest = { viewing = null }, containerColor = p.card, shape = RoundedCornerShape(24.dp),
+            title = { Text(s.name + " · Learned", style = Type.title, color = p.text) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("Axion wrote this skill itself from work it did for you. It loads these instructions before that kind of task.", style = Type.small, color = p.text2)
+                    Spacer(Modifier.height(10.dp))
+                    Text(body, style = Type.small.copy(fontSize = 13.sp, lineHeight = 19.sp), color = p.text)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.g.skills.deleteLearned(s.name); viewing = null }) { Text("Delete skill", color = p.danger) }
+            },
+            dismissButton = { TextButton(onClick = { viewing = null }) { Text("Close", color = p.text2) } })
     }
 }

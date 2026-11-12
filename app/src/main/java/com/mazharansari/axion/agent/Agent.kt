@@ -51,13 +51,63 @@ class Agent(
     private val stallMs: Long = 10_000,
     /** A reasoning model may think visibly (reasoning keeps streaming) this long before it must start answering. */
     private val thinkCapMs: Long = 45_000,
+    /** v0.10 learning loop: the persistent, agent-curated memory (snapshot goes into every prompt). */
+    private val memory: com.mazharansari.axion.data.MemoryStore? = null,
+    /** v0.10 learning loop: saved conversations, backing the session_search tool. */
+    private val conversations: com.mazharansari.axion.data.ConversationStore? = null,
+    /** v0.11: the user switched Deep Research mode on in the composer — factual turns must research, not recall. */
+    private val researchMode: Boolean = false,
+    /** v0.12: remembered approvals for gated shell work (null = no memory: only the interactive approver can allow). */
+    private val approvals: com.mazharansari.axion.data.ApprovalsStore? = null,
+    /** v0.12: asks the user about a gated action (null = headless: remembered kinds only, everything else refused). */
+    private val approver: Approver? = null,
+    /** v0.12: Long task mode — bigger round/tool budgets and plan-verify-finish guidance. */
+    private val longTask: Boolean = false,
+    /** v0.12 scheduler: the user's schedules, handed to the schedule_* tools through the ToolContext. */
+    private val schedules: com.mazharansari.axion.data.SchedulesStore? = null,
+    /** v0.12 scheduler: application context so schedule tools can arm WorkManager. */
+    private val appCtx: android.content.Context? = null,
 ) {
     companion object {
         fun defaultTools(): List<Tool> = listOf(
             WebSearchTool(), BrowseTool(), RunCommandTool(), ReadFileTool(), WriteFileTool(), ListFilesTool(),
             ExtractZipTool(), CreatePdfTool(), LoadSkillTool(), InstallSkillsTool(), HttpRequestTool(),
             VideoProbeTool(), VideoEditTool(),   // axion-p1.6
-        ) + com.mazharansari.axion.phone.PhoneTools.all()   // axion-p3: filtered out unless Tools library → Phone control is ON
+            // v0.9: Axion's own browser (real WebView) + the persistent terminal and background jobs
+            BrowserOpenTool(), BrowserReadTool(), BrowserClickTool(), BrowserTypeTool(), BrowserScrollTool(),
+            BrowserBackTool(), BrowserForwardTool(), BrowserReloadTool(), BrowserSearchTool(), BrowserScreenshotTool(),
+            ShellSessionTool(), ShellResetTool(), RunBackgroundTool(), JobOutputTool(), JobKillTool(),
+            // v0.10: the learning loop — persistent memory, self-written skills, past-chat search
+            MemoryAddTool(), MemoryReplaceTool(), MemoryRemoveTool(), MemoryReadTool(),
+            SkillCreateTool(), SkillUpdateTool(), SkillDeleteTool(), SkillViewTool(), SessionSearchTool(),
+            // v0.11: deep research — the iterative search → read → gap → cross-check pipeline
+            DeepResearchTool(),
+            // v0.12: scheduled tasks — create/list/delete; WorkManager runs them headlessly later
+            ScheduleCreateTool(), ScheduleListTool(), ScheduleDeleteTool(),
+        )
+
+        /** v0.11: while Research mode is on, the model must investigate instead of answering from memory. */
+        const val RESEARCH_GUIDANCE = """RESEARCH MODE is ON (the user switched it on in the composer):
+- For anything that needs facts — current information, prices, comparisons, "which is better", how something works in the real world, a decision the user is weighing — call deep_research FIRST with the user's topic (depth "deep"; use "standard" only when the user asks for something quick), then present its report in full, keeping the [n] citations and the Sources list.
+- Do not answer a factual question from your own memory alone while this mode is on.
+- Pure conversation — greetings, opinions, thanks, and follow-ups about a report already given — needs no new research."""
+
+        /** v0.12: Long task mode — the run is a project, not a quick favour. */
+        const val LONG_TASK_GUIDANCE = """LONG TASK MODE is ON (the user switched it on in the composer):
+- Treat this as a long task: set a plan first (plan_set) with every step, then work through it step by step.
+- After each step, verify the result before moving on (re-read the file, re-run the check, look at the output). Do not assume a step worked.
+- You have a much larger step and tool budget than usual; use it — do not rush to finish early or skip verification to save steps.
+- If a step fails, try a different approach before giving up on it.
+- Keep the plan updated as you go (plan_update). Finish with a summary of everything that was done and anything left over."""
+
+        /** One internal model call (research planning / synthesis) may take this long before the next model is tried. */
+        const val ASK_TIMEOUT_MS = 180_000L
+
+        /** Hermes-style learning nudge, appended whenever the memory/skill tools are in play. */
+        const val LEARNING_GUIDANCE = """LEARNING — you improve between chats, like this:
+- MEMORY: you have a small persistent memory (memory_add / memory_replace / memory_remove / memory_read). When the user states a preference or habit, corrects you, or you learn a durable fact about them or their projects (names, decisions, lessons), save it — 'user' target for who they are and how they like things, 'memory' for facts and lessons. When a saved fact changes, memory_replace it instead of adding a conflicting second entry. Keep entries short and durable; never save passwords, keys or one-off small talk. Your saved memory is shown at the top of this prompt in future chats.
+- SKILLS: when you finish a task that took several steps, a tricky workaround, or a procedure the user may ask for again, write it down with skill_create (clear steps, pitfalls, how to verify) so you repeat it the same way; when using a skill teaches you something better, improve it with skill_update. Before a specialised task, load the matching skill (load_skill / skill_view) — your own learned skills are in the skills list like the others.
+- PAST CHATS: when the user refers to something from an earlier conversation ("last time…", "jo pehle decide hua tha") or you need an old decision, use session_search instead of guessing."""
     }
 
     suspend fun run(
@@ -78,10 +128,10 @@ class Agent(
         val all = every.filter { ToolCatalog.isEnabled(it.spec.name, sw) }                       // axion-p3: Tools library switches
         val offNames = every.map { it.spec.name }.filter { !ToolCatalog.isEnabled(it, sw) }.toSet()
         // v0.7.0: one capability set in every surface. Small talk still gets NO tools (instant, cheap); any real
-        // chat or lookup request gets the web + phone tools (IntentGate.chatTools), so "open the browser and
+        // chat or lookup request gets the web tools (IntentGate.chatTools), so "open the browser and
         // research this" works wherever the user says it. File/command tools still need an ACTION turn.
         val tools = when (intent) {
-            Intent.CHAT -> if (IntentGate.isSmallTalk(user.text, intent)) emptyList() else all.filter { it.spec.name in IntentGate.chatTools }
+            Intent.CHAT -> if (IntentGate.isSmallTalk(user.text, intent) && !researchMode) emptyList() else all.filter { it.spec.name in IntentGate.chatTools }
             Intent.LOOKUP -> all.filter { it.spec.name in IntentGate.chatTools }
             Intent.ACTION -> all
         } + planTools
@@ -90,19 +140,27 @@ class Agent(
         val hint = ScriptHint.note(user.text, history, followUp)
         // Keep requests small (Groq free tier: 8k tokens/min): recent turns verbatim, everything older → "Session notes" (decisions never dropped).
         val folded = HistoryCompressor.compress(history)
-        val sys = systemPrompt(profile, tools, intent) + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
-            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") +
-            (if (tools.any { it.spec.name == "phone_screen" }) "\n\n" + com.mazharansari.axion.phone.PhoneTools.PROMPT else "")
+        // v0.10: the memory snapshot rides in EVERY prompt (even small talk — it is how Axion knows the user);
+        // the learning guidance is added whenever this turn actually has the memory/skill tools.
+        val memBlock = memory?.promptBlock().orEmpty()
+        val learnBlock = if (memory != null && tools.any { it.spec.name == "memory_add" || it.spec.name == "skill_create" }) "\n\n" + LEARNING_GUIDANCE else ""
+        val researchBlock = if (researchMode && tools.any { it.spec.name == "deep_research" }) "\n\n" + RESEARCH_GUIDANCE else ""
+        val longTaskBlock = if (longTask && intent == Intent.ACTION) "\n\n" + LONG_TASK_GUIDANCE else ""
+        val sys = systemPrompt(profile, tools, intent) + memBlock + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
+            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock + longTaskBlock
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user
         val answer = StringBuilder()
-        val quick = IntentGate.isSmallTalk(user.text, intent)
+        val quick = !researchMode && IntentGate.isSmallTalk(user.text, intent)
         // v0.5.1: short/simple prompts ask reasoning models to think little (gpt-oss: reasoning_effort "low").
         val effort = if (quick || (intent == Intent.CHAT && user.text.trim().length <= 160)) "low" else null
         var planPhase = wantsPlan && tools.any { it.spec.name == Planner.PLAN_SET }
         var toolsOff = false
-        val policy = FaultPolicy()
+        // v0.12: a long task gets a far bigger budget (and more alternative attempts) than a quick favour.
+        val policy = FaultPolicy(maxAlternatives = if (longTask) 6 else 2, maxToolCalls = if (longTask) 200 else 40)
+        // v0.11: tools that think internally (deep research) get plain completions on this run's own models.
+        val ask: suspend (String) -> String = { prompt -> askOnce(attempts, prompt) }
         repeat(maxRounds) { round ->
             val specs = when { toolsOff -> emptyList(); planPhase -> listOf(Planner.planSetSpec); else -> tools.map { it.spec } }
             val (text, calls) = streamOnce(HistoryCompressor.compressRun(items), specs, attempts, sink, quick, effort)
@@ -110,7 +168,7 @@ class Agent(
             items += AssistantItem(text, calls)
             if (calls.isEmpty()) { answer.append(text); if (planState.active) { planState.finish(ok = !toolsOff, reason = "stopped early"); onPlan() }; return answer.toString() }
             if (text.isNotBlank()) sink.textToThoughts()
-            val ctx = ToolContext(workspace, skills)
+            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask)
             for (call in calls) {
                 val tool = byName[call.name]
                 val args = runCatching { Json.parseToJsonElement(call.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
@@ -120,6 +178,31 @@ class Agent(
                     items += ToolResultItem(call.id, call.name, o.forModel); continue
                 }
                 if (toolsOff) { items += ToolResultItem(call.id, call.name, "Tools are switched off for the rest of this task. Explain to the user what failed and why."); continue }
+                // v0.12: the approval gate — consequential shell work needs the user's OK (or a remembered rule).
+                var rememberedNote = false
+                val gate = ApprovalGate.requestFor(call.name, args)
+                if (gate != null) {
+                    if (!gate.hard && approvals?.matches(gate.pattern) == true) {
+                        rememberedNote = true
+                    } else {
+                        val decision = if (approver != null) approver.decide(gate) else ApprovalDecision.DENY
+                        if (decision == ApprovalDecision.ALLOW_REMEMBER && !gate.hard) approvals?.add(gate.pattern, gate.summary)
+                        if (decision == ApprovalDecision.DENY) {
+                            val gl = tool.label(args)
+                            val why = when {
+                                gate.hard -> "needs a fresh confirmation every time (${gate.hardReason})"
+                                approver == null -> "needs the user's approval, and nobody can be asked in this run"
+                                else -> "the user did not approve it"
+                            }
+                            sink.step(Step(id = UUID.randomUUID().toString(), kind = gl.kind, title = "Not approved", target = gl.target, status = StepStatus.ERROR,
+                                startedAt = System.currentTimeMillis(), endedAt = System.currentTimeMillis(),
+                                output = "Blocked: this command $why."))
+                            items += ToolResultItem(call.id, call.name,
+                                "The command was NOT run: it $why. Do not try to work around this (no other tool, no different spelling of the same command). Either continue the task without it or explain to the user what you needed it for.")
+                            continue
+                        }
+                    }
+                }
                 val label = tool.label(args)
                 val detail = when (call.name) {
                     "write_file" -> (args["content"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
@@ -129,7 +212,7 @@ class Agent(
                 val step = Step(id = UUID.randomUUID().toString(), kind = label.kind, title = label.title, target = label.target, status = StepStatus.RUNNING, startedAt = System.currentTimeMillis(), detail = detail)
                 sink.step(step)
                 var lastPush = 0L
-                val live = ToolContext(workspace, skills) { partial ->
+                val live = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask) { partial ->
                     val now = System.currentTimeMillis()
                     if (now - lastPush > 250) { lastPush = now; sink.step(step.copy(output = com.mazharansari.axion.security.SecretScanner.scrub(partial))) }
                 }
@@ -141,7 +224,7 @@ class Agent(
                 val out = outcome.output
                 val failedKind = outcome.kind == FaultPolicy.Kind.FAILED || outcome.kind == FaultPolicy.Kind.TIMED_OUT || outcome.kind == FaultPolicy.Kind.SKIPPED_REPEAT || outcome.kind == FaultPolicy.Kind.BUDGET
                 val doneTitle = (out.doneTitle ?: label.title) + if (outcome.kind == FaultPolicy.Kind.RETRIED_OK) " (retried)" else ""
-                val shown = if (failedKind) (if (outcome.mustReport) "Gave up: " else "Trying another way — ") + out.display.take(300) else out.display
+                val shown = (if (rememberedNote) "(remembered approval) " else "") + if (failedKind) (if (outcome.mustReport) "Gave up: " else "Trying another way — ") + out.display.take(300) else out.display
                 sink.step(step.copy(
                     title = doneTitle, status = if (out.isError) StepStatus.ERROR else StepStatus.DONE,
                     output = com.mazharansari.axion.security.SecretScanner.scrub(shown.clip(20000)), endedAt = System.currentTimeMillis(), exitCode = out.exitCode,   // axion-p1.4; v0.6.1: persisted step output cap 4k -> 20k
@@ -156,6 +239,38 @@ class Agent(
         }
         if (planState.active) { planState.finish(ok = false, reason = "step limit"); onPlan() }
         return answer.toString()
+    }
+
+    /**
+     * v0.11: ONE plain completion for a tool that thinks internally (deep-research planning, gap
+     * analysis, synthesis). Tries this run's attempts in order with a per-attempt timeout; a model
+     * that answers only in its reasoning channel has that text used, like streamOnce does.
+     */
+    private suspend fun askOnce(attempts: () -> List<Attempt>, prompt: String): String {
+        val list = attempts()
+        if (list.isEmpty()) throw NoModelException("No AI connector yet. Open Connectors and paste a free API key (Gemini, Groq, OpenRouter…).")
+        var last: Exception? = null
+        for (a in list) {
+            try {
+                val text = StringBuilder(); val reasoning = StringBuilder()
+                val finished = kotlinx.coroutines.withTimeoutOrNull(ASK_TIMEOUT_MS) {
+                    a.client.stream(LlmRequest(a.model, listOf(UserItem(prompt)))).collect { ev ->
+                        when (ev) {
+                            is LlmEvent.Text -> text.append(ev.delta)
+                            is LlmEvent.Reasoning -> reasoning.append(ev.delta)
+                            else -> {}
+                        }
+                    }
+                    true
+                }
+                val out = (if (text.isNotBlank()) text.toString() else reasoning.toString()).trim()
+                if (finished == true && out.isNotEmpty()) return out
+                last = LlmException("${a.model} gave no answer", FailKind.SERVER)
+            } catch (e: CancellationException) { throw e }
+            catch (e: LlmException) { a.onFail(e); last = e }
+            catch (e: Throwable) { last = LlmException(e.message ?: "model call failed", FailKind.SERVER) }
+        }
+        throw last ?: NoModelException("No model answered.")
     }
 
     private class SlowModel(val why: String) : CancellationException(why)
@@ -258,14 +373,17 @@ class Agent(
             appendLine("STYLE: talk like a smart friend in a chat — short and natural. Greetings and small talk get one or two warm lines, no headings, no lists. Use markdown only for real content (steps, tables, code).")
             appendLine("ACTIONS: only DO things (search, create files, run commands, build) when the user clearly asks for that action. Never create or write files for a greeting, a question, or small talk. If you are not sure what they want, ask ONE short question instead of acting.")
             appendLine("ABOUT YOU (answer honestly if asked): you can chat in English/Urdu/Roman Urdu, search the web and read pages, read uploaded files (PDF, docs, ZIP), write files and code, make PDF reports and images, run shell commands (${com.mazharansari.axion.linux.LinuxHub.devtools?.summaryForAgent() ?: "Android sh with toybox tools — Python/Node are NOT installed until the user installs Developer tools in Settings"}), use installed skills and MCP connectors, and do voice calls. Websites/apps are built in the Build tab.")
+            appendLine("You also have your OWN real web browser (the browser_* tools: pages open with JavaScript, cookies and logins persist, you can click, type into forms and take screenshots — the user can watch or take over in the Browser screen) and a persistent Linux terminal (shell_session keeps its directory and variables between commands; run_background runs long jobs).")
             if (tools.isEmpty()) {
                 appendLine("This message is conversation: answer directly from what you know. No tools are available for it; if the user wants you to search or make something, they can just ask.")
             } else {
                 appendLine()
                 appendLine("Tools for this request:")
-                if (intent == Intent.LOOKUP || intent == Intent.CHAT) appendLine("- Use web_search, then browse_url on the best results, and answer with facts you actually read. Never invent URLs, prices or numbers. If the user asks you to open an app or do something on the phone, use the phone tools (start with phone_screen). Only act when the user clearly asks.")
+                if (intent == Intent.LOOKUP || intent == Intent.CHAT) appendLine("- Use web_search, then browse_url on the best results, and answer with facts you actually read. Never invent URLs, prices or numbers. Only act when the user clearly asks. If a page needs JavaScript, a form, a click or a login, use your browser instead: browser_open the URL, browser_read it, then browser_click / browser_type with the element numbers from the read.")
                 else {
                     appendLine("- web_search + browse_url for current facts or websites; run_command for shell work; read_file/list_files/extract_zip for uploads (in uploads/); write_file for code/documents (files go in outputs/); create_pdf for reports; generate_image for pictures.")
+                    appendLine("- YOUR BROWSER (browser_* tools): a real browser — use it when a page needs JavaScript, clicking, typing into forms, logging in, or step-by-step navigation. Flow: browser_open (or browser_search) → read the numbered elements → browser_click / browser_type by number → browser_read again after each navigation (numbers change). browse_url is still the faster choice for a plain article or a quick static read. browser_screenshot saves a picture of the page for the user.")
+                    appendLine("- TERMINAL: run_command is a fresh shell each time (quick one-off commands). shell_session is ONE persistent shell — cd and exported variables survive between calls; use it for multi-step work in one place. run_background + job_output + job_kill are for commands that take many minutes (builds, downloads, servers) so the chat is not blocked.")
                     appendLine("- Load the matching skill (load_skill) before a specialised task. A GitHub URL with skills → install_skills_from_github.")
                     appendLine("- Safe steps need no permission; ask before anything destructive, paid or public. Finish with a short summary of what you did.")
                     val skillList = skills.skills.value.filter { it.enabled }.joinToString("\n") { "  - ${it.name}: ${it.description.take(100)}" }

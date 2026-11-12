@@ -47,11 +47,9 @@ class FaultPolicy(
             if (!r.isError) { consecutiveFailures = 0; return Outcome(r, if (attempt > 1) Kind.RETRIED_OK else Kind.OK, attempt, r.forModel, false) }
             // a command that RAN and exited non-zero is a result the model should read, not a glitch to repeat blindly
             if (r.exitCode != null && r.exitCode > 0) break
-            // v0.6.1: a phone action that timed out may already have happened on the phone — never blindly do it twice
-            if (timedOut && tool.startsWith("phone_")) break
             if (attempt == 1) { onRetry("Retrying…"); delay(retryPauseMs) }
         }
-        // v0.6.1: a safety refusal (exit 126 — banking block, password screen, the user did not CONFIRM) is not a fault and not an invitation
+        // a safety refusal (exit 126 — a blocked command or target) is not a fault and not an invitation
         // to find a way around it: no alternative-approach pressure, no failure streak, the refusal text itself tells the model what to do.
         if (last.exitCode == 126) return Outcome(last, Kind.FAILED, attempt, last.forModel, false)
         val err = errText(last); val key = sig(tool, argsKey, err); failed[key] = (failed[key] ?: 0) + attempt
@@ -67,11 +65,14 @@ class FaultPolicy(
     companion object {
         fun timeoutFor(tool: String, args: kotlinx.serialization.json.JsonObject): Long = when (tool) {
             "run_command" -> ((args.i("timeout_sec") ?: 60).coerceIn(1, 600) + 40) * 1000L
+            "shell_session" -> ((args.i("timeout_sec") ?: 120).coerceIn(1, 600) + 40) * 1000L
+            "browser_open", "browser_search" -> 120_000L
+            // v0.11: a research run is minutes of searching + reading by design (its own internal budget stops sooner).
+            "deep_research" -> if (args.s("depth")?.trim()?.lowercase() == "standard") 900_000L else 1_800_000L
             "video_edit" -> 1_700_000L
             "video_probe" -> 120_000L
             "generate_image" -> 150_000L
             "install_skills_from_github" -> 150_000L
-            "phone_tap" -> 180_000L   // v0.6.1: an irreversible tap may wait up to 90 s for the user's own CONFIRM press
             else -> 90_000L
         }
     }

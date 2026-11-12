@@ -47,9 +47,9 @@ class ToolsLibraryTest {
         assertEquals(ToolCatalog.groups.size, ToolCatalog.groups.map { it.id }.toSet().size)
         ToolCatalog.groups.forEach { assertTrue(it.title.isNotBlank() && it.description.length > 20) }
     }
-    @Test fun defaultsPhoneOffEverythingElseOn() {
-        ToolCatalog.groups.forEach { assertEquals(it.id != "phone", ToolCatalog.isEnabled(it, emptyMap())) }
-        assertTrue(ToolCatalog.isEnabled("plan_set", mapOf("web" to false))); assertFalse(ToolCatalog.isEnabled("web_search", mapOf("web" to false))); assertTrue(ToolCatalog.isEnabled("phone_tap", mapOf("phone" to true)))
+    @Test fun defaultsEverythingOn() {
+        ToolCatalog.groups.forEach { assertTrue(ToolCatalog.isEnabled(it, emptyMap())) }
+        assertTrue(ToolCatalog.isEnabled("plan_set", mapOf("web" to false))); assertFalse(ToolCatalog.isEnabled("web_search", mapOf("web" to false))); assertTrue(ToolCatalog.isEnabled("run_command", mapOf("commands" to true)))
     }
     @Test fun disabledToolIsNotOfferedAndTheModelIsToldToRefusePolitely() = runBlocking {
         val seen = mutableListOf<LlmRequest>()
@@ -83,16 +83,6 @@ class ToolsLibraryTest {
         val rec = Rec()
         agent(listOf(Fake("web_search")), emptyMap()).run(emptyList(), UserItem("search the web for karachi weather today"), { listOf(Attempt("Fake", "m", client)) }, rec, intent = Intent.ACTION)
         assertEquals(listOf("Web search & pages"), rec.used)
-    }
-    @Test fun phoneToolsAreHiddenUntilSwitchedOnThenGetTheirRules() = runBlocking {
-        val seen = mutableListOf<LlmRequest>()
-        val client = object : LlmClient { override fun stream(req: LlmRequest) = flow { seen += req; emit(LlmEvent.Text("ok")); emit(LlmEvent.Finished("stop")) } }
-        val tools = com.mazharansari.axion.phone.PhoneTools.all()
-        agent(tools, emptyMap()).run(emptyList(), UserItem("open the browser and search for weather"), { listOf(Attempt("Fake", "m", client)) }, Rec(), intent = Intent.ACTION)
-        assertTrue(seen[0].tools.none { it.name.startsWith("phone_") })
-        agent(tools, mapOf("phone" to true)).run(emptyList(), UserItem("open the browser and search for weather"), { listOf(Attempt("Fake", "m", client)) }, Rec(), intent = Intent.ACTION)
-        assertEquals(8, seen[1].tools.count { it.name.startsWith("phone_") })
-        assertTrue((seen[1].items.first() as SystemItem).text.contains("NEVER operate banking"))
     }
     @Test fun romanUrduPhoneRequestRoutesToActionWithTools() {
         assertEquals(Intent.ACTION, IntentGate.classify("browser khol kar ye topic search karo"))

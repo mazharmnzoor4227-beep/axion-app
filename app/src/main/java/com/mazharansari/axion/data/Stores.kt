@@ -43,6 +43,10 @@ data class AppSettings(
     val pasteAsFile: String = "Always ask",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,
+    /** v0.11: the composer's Research toggle — while on, factual questions go through the deep_research pipeline. */
+    val deepResearch: Boolean = false,
+    /** v0.12: the composer's Long task toggle — while on, ACTION turns get a far bigger step/tool budget and plan-verify-finish guidance. */
+    val longTask: Boolean = false,
     /** v0.5: the Build first-run "Install developer tools" popup was shown (addendum 2). */
     val buildIntroShown: Boolean = false,
     /** v0.5.3: the user chose "Continue as guest" on the sign-in screen (it then stays away; Settings → Account signs in). */
@@ -107,6 +111,36 @@ class ConversationStore(ctx: Context) {
                 File(dir, "${c.id}.json.tmp").apply { writeText(json.encodeToString(Scrub.conversation(c))); renameTo(File(dir, "${c.id}.json")) }
             }
         }
+    }
+
+    /**
+     * v0.10 (Hermes learning loop): full-text search over every saved conversation — the agent's
+     * `session_search` tool. Every keyword must appear in a message; each hit carries an excerpt
+     * around the first matching keyword so the model can answer "what did we decide about …?"
+     * without loading whole chats. Newest conversations first.
+     */
+    suspend fun search(query: String, limit: Int = 8): List<ChatSearchHit> = withContext(Dispatchers.IO) {
+        val words = query.lowercase().split(Regex("\\s+")).filter { it.length > 1 }
+        if (words.isEmpty()) return@withContext emptyList()
+        val hits = mutableListOf<ChatSearchHit>()
+        val files = dir.listFiles { f -> f.extension == "json" }.orEmpty().sortedByDescending { it.lastModified() }
+        for (f in files) {
+            if (hits.size >= limit) break
+            val c = runCatching { json.decodeFromString<Conversation>(f.readText()) }.getOrNull() ?: continue
+            for (m in c.messages) {
+                if (hits.size >= limit) break
+                val text = m.text
+                if (text.isBlank()) continue
+                val lower = text.lowercase()
+                if (!words.all { it in lower }) continue
+                val at = words.map { lower.indexOf(it) }.filter { it >= 0 }.minOrNull() ?: 0
+                val from = (at - 90).coerceAtLeast(0)
+                val to = (at + 190).coerceAtMost(text.length)
+                hits += ChatSearchHit(c.id, c.title, c.updatedAt, m.role,
+                    (if (from > 0) "…" else "") + text.substring(from, to).replace('\n', ' ').trim() + if (to < text.length) "…" else "")
+            }
+        }
+        hits
     }
 
     fun delete(id: String) { _index.value = _index.value.filterNot { it.id == id }; io.launch { File(dir, "$id.json").delete() } }

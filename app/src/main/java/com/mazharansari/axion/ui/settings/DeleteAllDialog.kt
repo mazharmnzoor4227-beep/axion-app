@@ -14,30 +14,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mazharansari.axion.security.DataWiper
 import com.mazharansari.axion.ui.ChatViewModel
-import com.mazharansari.axion.ui.components.*
 import com.mazharansari.axion.ui.theme.P
 import com.mazharansari.axion.ui.theme.Type
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** v0.5.2: Settings → About → Privacy Policy / Security / Terms of Use. */
-@Composable
-fun PolicyScreen(doc: PolicyText.Doc, back: () -> Unit) {
-    val p = P
-    SettingsPage(doc.title, back) {
-        Text("Last updated ${PolicyText.UPDATED} · Developer: Mazhar Ansari", style = Type.small, color = p.text2, modifier = Modifier.padding(start = 30.dp, end = 24.dp, top = 6.dp, bottom = 4.dp))
-        doc.sections.forEach { (head, body) ->
-            SectionLabel(head)
-            Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(p.card).padding(16.dp)) {
-                Text(body, style = Type.body.copy(fontSize = 15.sp, lineHeight = 22.sp), color = p.text)
-            }
-        }
-        Text("Questions: mazharalam4447@gmail.com", style = Type.small, color = p.text2, modifier = Modifier.padding(start = 30.dp, top = 20.dp))
-    }
-}
-
-/** v0.5.2 "Delete all data": what goes, then a typed confirmation, then the wipe (which closes Axion). */
+/**
+ * v0.5.2 "Delete all data": what goes, then a typed confirmation, then the wipe (which closes Axion).
+ * (It lived in the old PolicyScreens.kt next to the policy pages; the dialog stays — Data Controls and
+ * About both use it — so it keeps its own file now that the policy screens are gone.)
+ */
 @Composable
 fun DeleteAllDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
     val p = P; val ctx = LocalContext.current; val scope = rememberCoroutineScope()

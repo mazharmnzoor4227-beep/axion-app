@@ -4,14 +4,12 @@ sealed interface Route {
     data object Home : Route
     data object Settings : Route
     data object Appearance : Route
-    data object Haptics : Route
     data object Language : Route
     data object Advanced : Route
     data object Customize : Route
     data object Connectors : Route
     data object CustomConnector : Route
     data object Skills : Route
-    data object Voice : Route
     data object VoiceCall : Route
     data object Data : Route
     data object About : Route
@@ -24,20 +22,21 @@ sealed interface Route {
     data object LocalModels : Route
     data object MyServer : Route
     data object ServerGuide : Route
-    // v0.5.2
-    data object Privacy : Route
-    data object Security : Route
-    data object Terms : Route
     // v0.5.3
-    data object Account : Route
-    data object SignIn : Route
     data object Storage : Route
     // v0.6
     data object ToolsLibrary : Route
-    data object PhoneControl : Route
+    // v0.9
+    data object Browser : Route
+    data object Terminal : Route
+    // v0.10 — the learning loop
+    data object Memory : Route
+    // v0.12 — remembered approvals + scheduled tasks
+    data object Approvals : Route
+    data object Schedules : Route
 }
 
 /** v0.5.2: routes shown with FLAG_SECURE (a key, token or password can be typed or shown on them). */
 object SecureRoutes {
-    val all: Set<Route> = setOf(Route.Connectors, Route.CustomConnector, Route.Skills, Route.KeyBackup, Route.MyServer, Route.Antigravity, Route.Voice, Route.SignIn)
+    val all: Set<Route> = setOf(Route.Connectors, Route.CustomConnector, Route.Skills, Route.KeyBackup, Route.MyServer, Route.Antigravity)
 }

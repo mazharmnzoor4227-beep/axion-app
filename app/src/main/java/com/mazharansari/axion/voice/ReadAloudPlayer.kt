@@ -19,10 +19,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
@@ -35,7 +32,6 @@ import kotlin.math.roundToInt
  *    resolve by name at speak time, sentence chunks, Kodex pace).
  *  - Natural voices → Microsoft Edge neural voices ([EdgeTts]), MP3 per chunk, the next chunk fetched while the
  *    current one plays. Any failure → the Kodex default voice for this message, and a notice saying why.
- *  - ElevenLabs → the user's own key + Voice ID (unchanged from Kodex), same fallback.
  */
 object ReadAloudPlayer {
 
@@ -91,10 +87,6 @@ object ReadAloudPlayer {
             var voice = chosen
             if (voice.family == VoiceFamily.GEMINI && geminiKeys().isEmpty()) {
                 postNotice(app, "${voice.name} is a Gemini voice — add a Gemini key in Connectors. Using Rounded this time.")
-                voice = VoiceCatalog.kodex.first()
-            }
-            if (voice.family == VoiceFamily.ELEVENLABS && (VoicePrefs.secret(app, "elevenlabs") == null || VoicePrefs.secret(app, "elevenlabs_voice") == null)) {
-                postNotice(app, "ElevenLabs is your selected voice, but its key or Voice ID is missing — using Rounded this time.")
                 voice = VoiceCatalog.kodex.first()
             }
             // v0.4: the picked voice reads the answer; only an English phone voice + Urdu/Hindi script gets a same-gender stand-in.
@@ -161,7 +153,7 @@ object ReadAloudPlayer {
 
     private suspend fun runTransport(app: Context, voice: AxVoice, plain: String, my: Int): Boolean {
         val eng = when (voice.family) { VoiceFamily.KODEX -> Eng.DEVICE; VoiceFamily.GEMINI -> Eng.PCM; else -> Eng.MEDIA }
-        val size = when (eng) { Eng.DEVICE -> 240; Eng.PCM -> 520; Eng.MEDIA -> if (voice.family == VoiceFamily.ELEVENLABS) 800 else 700 }
+        val size = when (eng) { Eng.DEVICE -> 240; Eng.PCM -> 520; Eng.MEDIA -> 700 }
         val pace = VoicePrefs.pace(app)
         val t = Tx(my, eng, voice, chunkText(plain, size).map { Seg(it) }, 14.5f * pace)
         if (t.segs.isEmpty()) return true
@@ -259,16 +251,9 @@ object ReadAloudPlayer {
         val text = t.segs[i].text
         val d = scope.async(Dispatchers.IO) {
             runCatching {
-                val f = if (t.voice.family == VoiceFamily.NATURAL) {
-                    val rate = ((VoicePrefs.pace(app) - 1f) * 100f).roundToInt()
-                    val mp3 = EdgeTts.synthesize(text, VoiceCatalog.edgeVoiceFor(t.voice, text, VoicePrefs.smartUrdu(app)), rate)
-                    File(app.cacheDir, "axion-natural-${System.nanoTime()}.mp3").apply { writeBytes(mp3) }
-                } else {
-                    val key = VoicePrefs.secret(app, "elevenlabs") ?: error("no ElevenLabs key")
-                    val vid = VoicePrefs.secret(app, "elevenlabs_voice") ?: error("no Voice ID")
-                    val r = fetchElevenLabsChunk(app, key, vid, text)
-                    r.file ?: error(r.error ?: "request failed")
-                }
+                val rate = ((VoicePrefs.pace(app) - 1f) * 100f).roundToInt()
+                val mp3 = EdgeTts.synthesize(text, VoiceCatalog.edgeVoiceFor(t.voice, text, VoicePrefs.smartUrdu(app)), rate)
+                val f = File(app.cacheDir, "axion-natural-${System.nanoTime()}.mp3").apply { writeBytes(mp3) }
                 t.files += f
                 runCatching {
                     val mmr = android.media.MediaMetadataRetriever()
@@ -577,7 +562,7 @@ object ReadAloudPlayer {
     }
 
     /**
-     * A reply spoken sentence by sentence while it is still being written, in the active voice. Natural / ElevenLabs
+     * A reply spoken sentence by sentence while it is still being written, in the active voice. Natural
      * sentences are fetched the moment they are pushed (in parallel) and played in order, so only the first one's
      * fetch is waited on. [onDone] runs once when the stream ends or is stopped.
      */
@@ -603,19 +588,16 @@ object ReadAloudPlayer {
                     while (session == my && player.isSounding) kotlinx.coroutines.delay(60)
                     if (geminiPlayer === player) { geminiPlayer = null; player.stop() }
                 }
-                VoiceFamily.NATURAL, VoiceFamily.ELEVENLABS -> {
+                VoiceFamily.NATURAL -> {
                     val smart = VoicePrefs.smartUrdu(app)
                     val rate = ((VoicePrefs.pace(app) - 1f) * 100f).roundToInt()
-                    val elKey = VoicePrefs.secret(app, "elevenlabs"); val elId = VoicePrefs.secret(app, "elevenlabs_voice")
                     val fetched = kotlinx.coroutines.channels.Channel<Pair<String, Deferred<File?>>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
                     launch {
                         for (sentence in s.sentences) {
                             fetched.send(sentence to async(Dispatchers.IO) {
                                 runCatching {
-                                    if (voice.family == VoiceFamily.NATURAL) {
-                                        val mp3 = EdgeTts.synthesize(sentence, VoiceCatalog.edgeVoiceFor(voice, sentence, smart), rate)
-                                        File(app.cacheDir, "axion-stream-${System.nanoTime()}.mp3").apply { writeBytes(mp3) }
-                                    } else if (elKey != null && elId != null) fetchElevenLabsChunk(app, elKey, elId, sentence).file else null
+                                    val mp3 = EdgeTts.synthesize(sentence, VoiceCatalog.edgeVoiceFor(voice, sentence, smart), rate)
+                                    File(app.cacheDir, "axion-stream-${System.nanoTime()}.mp3").apply { writeBytes(mp3) }
                                 }.getOrNull()
                             })
                         }
@@ -667,63 +649,6 @@ object ReadAloudPlayer {
             if (engine.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS && cont.isActive) cont.resume(Unit)
         }
     }
-
-    // ------------------------------------------------------------------ ElevenLabs (unchanged from Kodex)
-
-    private suspend fun speakElevenLabs(context: Context, apiKey: String, voiceId: String, text: String, my: Int, onFailure: (String) -> Unit): Boolean {
-        for (chunk in chunkText(text, 800)) {
-            if (session != my) return true
-            val fetched = fetchElevenLabsChunk(context, apiKey, voiceId, chunk)
-            val file = fetched.file ?: run { onFailure(fetched.error ?: "request failed"); return false }
-            if (session != my) { file.delete(); return true }
-            val completed = playFile(file)
-            file.delete()
-            if (session != my) return true
-            if (!completed) { onFailure("audio playback failed"); return false }
-        }
-        finish(my)
-        return true
-    }
-
-    private class ElevenLabsFetch(val file: File?, val error: String?)
-
-    private suspend fun fetchElevenLabsChunk(context: Context, apiKey: String, voiceId: String, text: String): ElevenLabsFetch = withContext(Dispatchers.IO) {
-        try {
-            val connection = URL("https://api.elevenlabs.io/v1/text-to-speech/$voiceId").openConnection() as HttpURLConnection
-            connection.requestMethod = "POST"; connection.connectTimeout = 15_000; connection.readTimeout = 30_000; connection.doOutput = true
-            connection.setRequestProperty("xi-api-key", apiKey)
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Accept", "audio/mpeg")
-            val body = JSONObject().apply {
-                put("text", text); put("model_id", "eleven_multilingual_v2")
-                put("voice_settings", JSONObject().apply { put("stability", 0.5); put("similarity_boost", 0.75) })
-            }.toString()
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                val errorBody = runCatching { connection.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull().orEmpty()
-                connection.disconnect()
-                return@withContext ElevenLabsFetch(null, "HTTP $code" + (elevenLabsErrorDetail(errorBody)?.let { " — $it" } ?: ""))
-            }
-            val file = File(context.cacheDir, "axion-readaloud-${System.nanoTime()}.mp3")
-            connection.inputStream.use { input -> file.outputStream().use { input.copyTo(it) } }
-            connection.disconnect()
-            if (file.length() > 0L) ElevenLabsFetch(file, null) else ElevenLabsFetch(null, "empty audio reply")
-        } catch (e: Exception) {
-            ElevenLabsFetch(null, "network problem (${e.message ?: "no connection"})")
-        }
-    }
-
-    private fun elevenLabsErrorDetail(body: String): String? = runCatching {
-        if (body.isBlank()) return null
-        val root = JSONObject(body)
-        val message = when (val detail = root.opt("detail")) {
-            is JSONObject -> detail.optString("message").ifBlank { detail.optString("status") }
-            is String -> detail
-            else -> root.optString("message")
-        }
-        message.ifBlank { null }?.take(140)
-    }.getOrNull()
 
     private suspend fun playFile(file: File, startAtMs: Long = 0L): Boolean = suspendCancellableCoroutine { cont ->
         val player = MediaPlayer()
@@ -788,12 +713,6 @@ object ReadAloudPlayer {
     }
 }
 
-internal fun elevenLabsPlainHint(reason: String?): String? {
-    val text = reason ?: return null
-    return if (text.contains("402") && text.contains("library", ignoreCase = true))
-        "This is a library voice. ElevenLabs' free plan can't use library voices through the API — use one of your own voices."
-    else null
-}
 
 /** Voice settings storage. */
 object VoicePrefs {
@@ -818,7 +737,7 @@ object VoicePrefs {
     fun smartUrdu(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_SMART_URDU, false)   // v0.4: opt-in (it swapped his picked voice)
     fun secret(ctx: Context, key: String): String? =
         prefs(ctx).getString("enc_$key", null)?.let { com.mazharansari.axion.data.KeyVault.decrypt(it) }?.takeIf { it.isNotBlank() }
-    /** v0.5.2: every secret saved here (ElevenLabs key…), for the leak scanner. */
+    /** v0.5.2: every secret saved here, for the leak scanner. */
     fun savedSecrets(ctx: Context): List<String> = prefs(ctx).all.keys.filter { it.startsWith("enc_") }.mapNotNull { secret(ctx, it.removePrefix("enc_")) }
     fun setSecret(ctx: Context, key: String, value: String?) {
         prefs(ctx).edit().apply { if (value.isNullOrBlank()) remove("enc_$key") else putString("enc_$key", com.mazharansari.axion.data.KeyVault.encrypt(value.trim())) }.apply()
