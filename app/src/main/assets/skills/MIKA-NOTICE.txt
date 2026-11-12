@@ -1,0 +1,1 @@
+Skill texts under skills/mika-* are adapted from the Mika project (Copyright 2026 wangzan101), licensed under the Apache License 2.0. Full license: MIKA-LICENSE-Apache-2.0.txt.
