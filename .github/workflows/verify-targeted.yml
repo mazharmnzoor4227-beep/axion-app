@@ -7,6 +7,8 @@
 # Run this on BOTH the fix branch and the release-0.9.3 baseline and compare.
 name: Verify Targeted (v0.9.4)
 on:
+  push:
+    branches: [axion-v094-composer-fix, axion-baseline-test]
   workflow_dispatch:
 jobs:
   test:
