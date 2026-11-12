@@ -29,6 +29,9 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew testDebugUnitTest --no-daemon --stacktrace --tests "com.mazharansari.axion.EnglishUiTest" --tests "com.mazharansari.axion.V052SpeedBugTest" || true
+      - name: Legacy composer UI classes (V03 is the composer area this fix touches)
+        run: |
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace --tests "com.mazharansari.axion.V03ScreensTest" --tests "com.mazharansari.axion.V053AuthStorageTest" || true
       - name: Unrun classes, one by one
         run: |
           for c in ChangeGateTest CommandStatusTest FaultToleranceTest HistoryCompressionTest PlanningTest V05LogicTest V05ScreensTest V06ScreensTest VideoCommandTest VoiceLogicTest VoiceSelectionTest; do
