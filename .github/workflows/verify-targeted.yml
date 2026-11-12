@@ -1,0 +1,43 @@
+# Targeted verification for the v0.9.4 composer fix (one-off, not the full suite).
+# The full suite hangs on CI after V053AuthStorageTest (46 min of silence, no output),
+# so the disputed items are checked here instead, one class at a time with a hard
+# per-class timeout so a hanging class is named instead of stalling the whole run:
+#  - EnglishUiTest + V052SpeedBugTest: the two failures outside the known legacy set
+#  - the 11 classes the full run never reached
+# Run this on BOTH the fix branch and the release-0.9.3 baseline and compare.
+name: Verify Targeted (v0.9.4)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install SDK packages
+        run: |
+          SDKM=$(ls $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager | sort | tail -1)
+          yes | $SDKM --licenses > /dev/null 2>&1 || true
+          $SDKM "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
+      - name: Disputed failures
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace --tests "com.mazharansari.axion.EnglishUiTest" --tests "com.mazharansari.axion.V052SpeedBugTest" || true
+      - name: Unrun classes, one by one
+        run: |
+          for c in ChangeGateTest CommandStatusTest FaultToleranceTest HistoryCompressionTest PlanningTest V05LogicTest V05ScreensTest V06ScreensTest VideoCommandTest VoiceLogicTest VoiceSelectionTest; do
+            echo "===== CLASS $c ====="
+            timeout 480 ./gradlew testDebugUnitTest --no-daemon --tests "com.mazharansari.axion.$c" || echo "EXIT $? for $c"
+          done
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-targeted
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
