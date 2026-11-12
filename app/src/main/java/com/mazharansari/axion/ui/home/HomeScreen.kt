@@ -341,6 +341,16 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                 // v0.5.2 (mazhar's test): Build never shows the Ask-only key chips — it shows what Build actually needs.
                 if (messages.isEmpty() && !plus && !model && build) BuildChips(ready = vm.buildReady(), onAgy = { navigate(Route.Antigravity) }, onTools = { navigate(Route.DevTools) })
                 else if (messages.isEmpty() && !plus && !model) SuggestionChips(noKeys = connectors.isEmpty(), onConnect = { navigate(Route.Connectors) }, onSkills = { navigate(Route.Skills) }, onBuild = onBuild, onVoice = { navigate(Route.VoiceCall) })
+                // v0.9.4: the 10X tool toggles live in their own line ABOVE the box — inside the box they
+                // pushed the mic and the Send button off the right edge (no Send at all). Same chips,
+                // same behaviour, only the placement changed. Ask only: Build never shows them.
+                if (!build) ToolsRow(
+                    researchOn = settings.deepResearch,
+                    onResearch = { g.settings.update { it.copy(deepResearch = !it.deepResearch) } },
+                    longTaskOn = settings.longTask,
+                    onLongTask = { g.settings.update { it.copy(longTask = !it.longTask) } },
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
                 Composer(
                     modifier = Modifier.onGloballyPositioned { composerTopPx = it.boundsInRoot().top },
                     text = vm.draft, onText = { vm.draft = it }, placeholder = if (build) "Type to Build…" else "Ask anything",
@@ -357,10 +367,6 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                     onMicCancel = { g.speech.cancel() },
                     onSend = { vm.send() }, onStop = { vm.stop() }, onVoiceCall = { navigate(Route.VoiceCall) },
                     plusOpen = plus, modeOpen = model, onFocus = { vm.prewarm() },
-                    researchOn = if (build) null else settings.deepResearch,
-                    onResearch = { g.settings.update { it.copy(deepResearch = !it.deepResearch) } },
-                    longTaskOn = if (build) null else settings.longTask,
-                    onLongTask = { g.settings.update { it.copy(longTask = !it.longTask) } },
                 )
             }
             // v0.12: the approval gate — a consequential shell command waits for the user's answer.

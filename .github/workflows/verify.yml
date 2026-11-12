@@ -1,0 +1,37 @@
+# v0.9.4: unit-test verification for the composer fix (and every later fix branch).
+# The release workflow (build.yml) only assembles the APK — it never runs tests, so a
+# green build alone says nothing about the test suite. This workflow runs the unit tests
+# and always uploads the reports; judge the run by the REPORT contents, not the job
+# conclusion: the known legacy failures are V03ScreensTest x2, V053AuthStorageTest x1,
+# V053ScreensTest x3, V05ScreensTest x1. Anything outside that set is a real regression.
+name: Verify Tests (v0.9.4)
+on:
+  push:
+    branches: [axion-v094-composer-fix]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install SDK packages
+        run: |
+          SDKM=$(ls $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager | sort | tail -1)
+          yes | $SDKM --licenses > /dev/null 2>&1 || true
+          $SDKM "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
+      - name: Run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace || true
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/

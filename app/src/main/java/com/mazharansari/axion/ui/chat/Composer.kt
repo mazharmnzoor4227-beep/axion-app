@@ -46,10 +46,6 @@ fun Composer(
     onMicCancel: () -> Unit = onMic,
     /** v0.5.2 speed: the field got focus or the first character was typed — warm up the connection. */
     onFocus: () -> Unit = {},
-    /** v0.11: Deep Research toggle chip, shown in the Ask composer only (null = hidden; Build / Imagine pass nothing). */
-    researchOn: Boolean? = null, onResearch: () -> Unit = {},
-    /** v0.12: Long task toggle chip, same deal — Ask composer only. */
-    longTaskOn: Boolean? = null, onLongTask: () -> Unit = {},
 ) {
     val p = P
     val shape = RoundedCornerShape(if (compact) 28.dp else 20.dp)
@@ -87,8 +83,6 @@ fun Composer(
             RoundTool(if (plusOpen) Gk.close else Gk.plus, "Attach", onPlus)
             Spacer(Modifier.width(6.dp))
             ModeChip(modeLabel, modeOpen, onMode)
-            if (researchOn != null) { Spacer(Modifier.width(6.dp)); ResearchChip(researchOn, onResearch) }
-            if (longTaskOn != null) { Spacer(Modifier.width(6.dp)); LongTaskChip(longTaskOn, onLongTask) }
             Spacer(Modifier.weight(1f))
             val state = when { running -> 2; text.isNotBlank() || attachments.isNotEmpty() -> 1; else -> 0 }
             AnimatedVisibility(!running, enter = fadeIn(tween(120)), exit = fadeOut(tween(120))) {
@@ -136,6 +130,26 @@ private fun ModeChip(label: String, open: Boolean, onClick: () -> Unit) {
 
 fun modeIcon(label: String) = when (label) { "Fast" -> Gk.bolt; "Expert" -> Gk.think; "Heavy" -> Gk.connectors; "Build" -> Gk.hammer; else -> Gk.rocket }
 
+/** 0 = Speak pill (empty, opens voice), 1 = send ↑, 2 = stop ■, 3 = disabled send (Build). */
+@Composable
+private fun SendButton(state: Int, onSend: () -> Unit, onStop: () -> Unit, onVoice: () -> Unit) {
+    val p = P
+    val tap = rememberTap { when (state) { 0 -> onVoice(); 1 -> onSend(); 2 -> onStop(); else -> {} } }
+    val bg = if (state == 3) p.chip else p.accent
+    Row(
+        Modifier.height(36.dp).animateContentSize(tween(160)).clip(RoundedCornerShape(50)).background(bg).clickable(onClick = tap)
+            .padding(horizontal = if (state == 0) 14.dp else 0.dp).widthIn(min = 36.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
+    ) {
+        when (state) {
+            0 -> { GkIcon(Gk.voice, "Voice mode", 18.dp, p.onAccent); Spacer(Modifier.width(6.dp)); Text("Speak", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = p.onAccent) }
+            1 -> Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { GkIcon(Gk.send, "Send", 20.dp, p.onAccent) }
+            2 -> Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(p.onAccent)) }
+            else -> Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { GkIcon(Gk.send, "Send", 20.dp, p.text3) }
+        }
+    }
+}
+
 /** v0.11: the Deep Research toggle — filled with the accent colour while on, so the mode is visible at a glance. */
 @Composable
 private fun ResearchChip(on: Boolean, onClick: () -> Unit) {
@@ -160,23 +174,16 @@ private fun LongTaskChip(on: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 0 = Speak pill (empty, opens voice), 1 = send ↑, 2 = stop ■, 3 = disabled send (Build). */
+/**
+ * v0.9.4: the 10X tool toggles (Research, Long task) live in their own line ABOVE the composer box,
+ * not inside it. Inside the box they pushed the mic and the Send button off the right edge — the
+ * user had no Send button at all. Same chips, same behaviour, only the placement changed.
+ * Rendered by HomeScreen directly above Composer (Ask only).
+ */
 @Composable
-private fun SendButton(state: Int, onSend: () -> Unit, onStop: () -> Unit, onVoice: () -> Unit) {
-    val p = P
-    val tap = rememberTap { when (state) { 0 -> onVoice(); 1 -> onSend(); 2 -> onStop(); else -> {} } }
-    val bg = if (state == 3) p.chip else p.accent
-    Row(
-        Modifier.height(36.dp).animateContentSize(tween(160)).clip(RoundedCornerShape(50)).background(bg).clickable(onClick = tap)
-            .padding(horizontal = if (state == 0) 14.dp else 0.dp).widthIn(min = 36.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
-    ) {
-        when (state) {
-            0 -> { GkIcon(Gk.voice, "Voice mode", 18.dp, p.onAccent); Spacer(Modifier.width(6.dp)); Text("Speak", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = p.onAccent) }
-            1 -> Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { GkIcon(Gk.send, "Send", 20.dp, p.onAccent) }
-            2 -> Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(p.onAccent)) }
-            else -> Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { GkIcon(Gk.send, "Send", 20.dp, p.text3) }
-        }
+fun ToolsRow(researchOn: Boolean, onResearch: () -> Unit, longTaskOn: Boolean, onLongTask: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        ResearchChip(researchOn, onResearch)
+        LongTaskChip(longTaskOn, onLongTask)
     }
 }
-
