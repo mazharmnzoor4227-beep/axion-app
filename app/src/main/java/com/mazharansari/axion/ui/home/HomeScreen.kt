@@ -372,15 +372,26 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                             g.settings.update { it.copy(deepResearch = true, toolSwitches = it.toolSwitches + ("research" to true)) }
                             vm.toast = "Deep research turned back on in Tools library."
                         } else {
-                            g.settings.update { it.copy(deepResearch = !it.deepResearch) }
+                            // A tap must say so: a shade change alone left the user unsure the toggle had worked.
+                            val on = !s.deepResearch
+                            g.settings.update { it.copy(deepResearch = on) }
+                            vm.toast = if (on) "Deep research ON — your next message will use deep research." else "Deep research OFF."
                         }
                     },
                     longTaskOn = settings.longTask,
-                    onLongTask = { g.settings.update { it.copy(longTask = !it.longTask) } },
+                    onLongTask = {
+                        val on = !settings.longTask
+                        g.settings.update { it.copy(longTask = on) }
+                        vm.toast = if (on) "Long task ON — your next message will run as a long task." else "Long task OFF."
+                    },
                     // P1-3 Turbo (server): per-task toggle; off by default, and it only takes
                     // effect when a server is set up in Settings → Turbo (server).
                     turboOn = settings.turbo,
-                    onTurbo = { g.settings.update { it.copy(turbo = !it.turbo) } },
+                    onTurbo = {
+                        val on = !settings.turbo
+                        g.settings.update { it.copy(turbo = on) }
+                        vm.toast = if (on) "Turbo ON — your next task runs on your server." else "Turbo OFF."
+                    },
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 Composer(
