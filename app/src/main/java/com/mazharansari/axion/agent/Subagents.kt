@@ -137,8 +137,9 @@ object SubagentOrchestrator {
     fun normaliseUrl(url: String): String {
         val u = url.trim().lowercase()
             .removePrefix("https://").removePrefix("http://").removePrefix("www.")
-            .trimEnd('/')
-        return u.substringBefore('?').substringBefore('#')
+        // Strip the query/fragment FIRST: "example.com/a/?utm=x" must lose its slash too,
+        // or it never matches "example.com/a" (trimEnd before substringBefore kept the "/").
+        return u.substringBefore('?').substringBefore('#').trimEnd('/')
     }
 
     /** Fact-text dedupe key: case/whitespace/punctuation-insensitive, capped so long texts compare cheaply. */
