@@ -83,9 +83,13 @@ fun GitHubScreen(vm: ChatViewModel, back: () -> Unit) {
             if (System.currentTimeMillis() - started > dc.expiresInSec * 1000L) {
                 pollStatus = "The code expired. Get a new code and try again."; code = null; break
             }
+            // `continue` cannot live inside the getOrElse lambda (experimental
+            // "break and continue in inline lambdas") — a null result means the
+            // poll failed, so wait and let the loop's own `continue` run.
             val r = runCatching { GitHubDeviceFlowClient.poll(st.clientId, dc.deviceCode, dc.intervalSec) }.getOrElse {
-                pollStatus = "Couldn't reach GitHub: ${it.message}"; delay(5000); continue
+                pollStatus = "Couldn't reach GitHub: ${it.message}"; null
             }
+            if (r == null) { delay(5000); continue }
             when (r) {
                 is GitHubDeviceFlow.PollResult.Token -> {
                     store.saveOAuthToken(r.accessToken); code = null; pollStatus = "Signed in."; afterConnect(); break

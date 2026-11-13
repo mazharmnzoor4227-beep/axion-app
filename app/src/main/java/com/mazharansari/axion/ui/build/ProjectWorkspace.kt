@@ -383,7 +383,7 @@ private fun DemoCard(vm: ChatViewModel) {
                 Text("Recorded ${lastFile?.name ?: "video"} — tap Share to send it.", style = Type.small, color = p.text2)
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    BigButton("Share video", modifier = Modifier.weight(1f)) { lastFile?.let { f -> runCatching { ctx.startActivity(android.content.Intent.createChooser(BuildDemo.shareIntent(ctx, f), "Share demo video").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } } } }
+                    BigButton("Share video", modifier = Modifier.weight(1f)) { lastFile?.let { f -> runCatching { ctx.startActivity(android.content.Intent.createChooser(BuildDemo.shareIntent(ctx, f), "Share demo video").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } } }
                     BigButton("Record again", modifier = Modifier.weight(1f)) { state = DemoState.IDLE; runCatching { captureLauncher.launch(BuildDemo.captureIntent(ctx)) }.onFailure { vm.toast = "Screen recording is not available on this phone." } }
                 }
             }

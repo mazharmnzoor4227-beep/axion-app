@@ -1,11 +1,13 @@
 package com.mazharansari.axion.agent
 
+import com.mazharansari.axion.data.StepKind
 import com.mazharansari.axion.github.GitAuditEntry
 import com.mazharansari.axion.github.GitCommands
 import com.mazharansari.axion.github.GitHubApi
 import com.mazharansari.axion.github.GitHubRepo
 import com.mazharansari.axion.github.GitHubStore
 import com.mazharansari.axion.linux.LinuxHub
+import com.mazharansari.axion.llm.ToolSpec
 import com.mazharansari.axion.security.SecretScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

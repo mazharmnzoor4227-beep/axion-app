@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 
 /**
@@ -94,19 +95,21 @@ data class PluginManifest(
  * ```
  */
 object PluginManifestParser {
-    fun parse(json: String): PluginManifest? = try {
-        val obj = Json.parseToJsonElement(json).jsonObject
-        val id = obj.string("id") ?: return null
-        if (!isValidPluginId(id)) return null
-        val name = obj.string("name")?.takeIf { it.isNotBlank() } ?: return null
-        val version = obj.string("version")?.takeIf { it.isNotBlank() } ?: return null
-        val description = obj.string("description") ?: return null
-        val toolNamesElement = obj["toolNames"] as? JsonArray ?: return null
-        val toolNames = toolNamesElement.map { (it as? JsonPrimitive)?.contentOrNull ?: return null }
-        if (toolNames.any { it.isBlank() }) return null
-        PluginManifest(id, name, version, description, toolNames)
-    } catch (_: Exception) {
+    fun parse(json: String): PluginManifest? {
+        return try {
+            val obj = Json.parseToJsonElement(json).jsonObject
+            val id = obj.string("id") ?: return null
+            if (!isValidPluginId(id)) return null
+            val name = obj.string("name")?.takeIf { it.isNotBlank() } ?: return null
+            val version = obj.string("version")?.takeIf { it.isNotBlank() } ?: return null
+            val description = obj.string("description") ?: return null
+            val toolNamesElement = obj["toolNames"] as? JsonArray ?: return null
+            val toolNames = toolNamesElement.map { (it as? JsonPrimitive)?.contentOrNull ?: return null }
+            if (toolNames.any { it.isBlank() }) return null
+            PluginManifest(id, name, version, description, toolNames)
+        } catch (_: Exception) {
         null
+    }
     }
 
     private fun JsonObject.string(key: String): String? =

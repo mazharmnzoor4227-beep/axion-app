@@ -3,6 +3,7 @@ package com.mazharansari.axion.work
 import com.mazharansari.axion.Graph
 import com.mazharansari.axion.data.ScheduleEntry
 import com.mazharansari.axion.data.ScheduleType
+import com.mazharansari.axion.github.GitHubApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -96,7 +97,7 @@ class DigestComposer(private val g: Graph) {
             val owner = parts.getOrNull(0).orEmpty()
             val name = parts.getOrNull(1).orEmpty()
             if (owner.isBlank() || name.isBlank()) return@mapNotNull null
-            runCatching { gh.checks(owner, name, "main") }.fold(
+            runCatching { GitHubApi(token = { gh.token() }).checks(owner, name, "main") }.fold(
                 onSuccess = { "• $repo (main)\n$it" },
                 onFailure = { "• $repo: could not read CI status (${it.message ?: "unknown error"})" },
             )

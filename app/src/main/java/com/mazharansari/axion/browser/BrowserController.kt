@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.MutableContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -311,10 +312,10 @@ class BrowserController(private val app: Application) {
     }
 
     private fun pollDownload(d: DownloadState) = runCatching {
-        val dm = app.getSystemService(DownloadManager::class.java) ?: return
-        val cursor = runCatching { dm.query(DownloadManager.Query().setFilterById(d.id)) }.getOrNull() ?: return
+        val dm = app.getSystemService(DownloadManager::class.java) ?: return@runCatching
+        val cursor = runCatching { dm.query(DownloadManager.Query().setFilterById(d.id)) }.getOrNull() ?: return@runCatching
         cursor.use {
-            if (!it.moveToFirst()) { updateDownload(d.id) { copy(status = DownloadStatus.FAILED) }; return }
+            if (!it.moveToFirst()) { updateDownload(d.id) { copy(status = DownloadStatus.FAILED) }; return@runCatching }
             val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
             val received = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
             val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))

@@ -218,17 +218,19 @@ class BrowserDownloadsTool : Tool {
         schema { },
     )
     override fun label(args: JsonObject) = StepLabel(StepKind.BROWSE, "Downloads", "")
-    override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput = try {
-        val list = browser().downloads.value
-        if (list.isEmpty()) return ToolOutput("No downloads yet. When a page offers a file, the browser saves it into Downloads/Axion.")
-        val out = list.joinToString("\n") { d ->
-            "- ${d.fileName}: " + when (d.status) {
-                com.mazharansari.axion.browser.DownloadStatus.DOWNLOADING ->
-                    if (d.progressPercent >= 0) "downloading, ${d.progressPercent}%" else "downloading"
-                com.mazharansari.axion.browser.DownloadStatus.COMPLETE -> "complete, saved in Downloads/Axion"
-                com.mazharansari.axion.browser.DownloadStatus.FAILED -> "failed"
+    override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput {
+        return try {
+            val list = browser().downloads.value
+            if (list.isEmpty()) return ToolOutput("No downloads yet. When a page offers a file, the browser saves it into Downloads/Axion.")
+            val out = list.joinToString("\n") { d ->
+                "- ${d.fileName}: " + when (d.status) {
+                    com.mazharansari.axion.browser.DownloadStatus.DOWNLOADING ->
+                        if (d.progressPercent >= 0) "downloading, ${d.progressPercent}%" else "downloading"
+                    com.mazharansari.axion.browser.DownloadStatus.COMPLETE -> "complete, saved in Downloads/Axion"
+                    com.mazharansari.axion.browser.DownloadStatus.FAILED -> "failed"
+                }
             }
-        }
-        ToolOutput("Downloads (${list.size}):\n$out", doneTitle = "${list.size} downloads")
-    } catch (e: Throwable) { ToolOutput("Browser error: ${e.message}", isError = true) }
+            ToolOutput("Downloads (${list.size}):\n$out", doneTitle = "${list.size} downloads")
+        } catch (e: Throwable) { ToolOutput("Browser error: ${e.message}", isError = true) }
+    }
 }

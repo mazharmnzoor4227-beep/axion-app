@@ -81,7 +81,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissInterruptedTask() { interruptedTask = null; g.taskRuns.clear() }
     /** P2-2: reopen the interrupted chat AND pre-fill the continue prompt — the user taps Send to resume from the TaskRuns record. */
     fun resumeInterruptedTask() {
-        interruptedTask?.let { rec -> open(it.conversationId); if (rec.goal.isNotBlank()) draft = com.mazharansari.axion.agent.ContextBudget.resumeDraft(rec.goal) }
+        interruptedTask?.let { rec -> open(rec.conversationId); if (rec.goal.isNotBlank()) draft = com.mazharansari.axion.agent.ContextBudget.resumeDraft(rec.goal) }
         interruptedTask = null
     }
     var debugOpenFile by mutableStateOf<String?>(null)
