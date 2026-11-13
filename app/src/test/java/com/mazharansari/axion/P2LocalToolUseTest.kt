@@ -2,6 +2,7 @@ package com.mazharansari.axion
 
 import com.mazharansari.axion.agent.*
 import com.mazharansari.axion.data.StepKind
+import com.mazharansari.axion.llm.ToolSpec
 import com.mazharansari.axion.llm.UserItem
 import com.mazharansari.axion.local.*
 import com.mazharansari.axion.skills.SkillRepo
