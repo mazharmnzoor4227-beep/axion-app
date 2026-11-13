@@ -79,7 +79,8 @@ class BrowserTabsTest {
         m.goBack()
         m.navigate("https://c.example/")
         assertFalse(m.active.canGoForward)
-        assertEquals("https://b.example/", m.goBack())
+        // The forward entry (b) is gone: back from c lands on a, not b.
+        assertEquals("https://a.example/", m.goBack())
         assertEquals("https://c.example/", m.goForward())
     }
 

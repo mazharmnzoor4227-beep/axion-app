@@ -44,8 +44,11 @@ object BrowserDownloads {
             .find(contentDisposition)?.groupValues?.getOrNull(1)?.let { raw ->
                 runCatching { URLDecoder.decode(raw, "UTF-8") }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
             }
-        // Plain: filename="name.ext" or filename=name.ext
-        Regex("""filename\s*=\s*"?([^";\s]+)"?""", RegexOption.IGNORE_CASE)
+        // Plain: filename="name with spaces.ext" (quoted — spaces allowed) or filename=name.ext.
+        // The quoted form must be tried first: [^";\s]+ stops at the space inside "report 2026.pdf".
+        Regex("""filename\s*=\s*"([^"]+)"""", RegexOption.IGNORE_CASE)
+            .find(contentDisposition)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { return it }
+        Regex("""filename\s*=\s*([^";\s]+)""", RegexOption.IGNORE_CASE)
             .find(contentDisposition)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { return it }
         return null
     }
@@ -55,6 +58,9 @@ object BrowserDownloads {
         val path = runCatching { java.net.URI(url.trim()).rawPath }.getOrNull() ?: return null
         val last = path.substringAfterLast('/').trim()
         if (last.isBlank()) return null
+        // A bare path segment with no extension ("/dl", "/download") is a route, not a
+        // file name — return null so the MIME/plain fallback names it ("download.pdf").
+        if ('.' !in last || last.startsWith('.') || last.endsWith('.')) return null
         return runCatching { URLDecoder.decode(last, "UTF-8") }.getOrDefault(last).trim().takeIf { it.isNotBlank() }
     }
 

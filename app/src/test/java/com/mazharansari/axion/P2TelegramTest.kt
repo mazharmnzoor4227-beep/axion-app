@@ -21,7 +21,8 @@ import java.nio.file.Files
  * no network, no real credentials, no Android framework, no Robolectric.
  *
  * The store is backed by a temp-dir file with a trivial test cipher
- * ("enc:" prefix) instead of KeyVault, which needs the Android Keystore
+ * ("enc:" prefix + reversed text, so the blob never contains the plain
+ * token) instead of KeyVault, which needs the Android Keystore
  * (its "plain:" fallback exists only under Robolectric). The bot talks
  * only to [FakeTelegramApi], never to a real Telegram server.
  */
@@ -56,8 +57,10 @@ class P2TelegramTest {
     private fun testStore(dir: File = Files.createTempDirectory("telegram-test").toFile()): TelegramStore =
         TelegramStore(
             file = File(dir, "telegram.json"),
-            encryptFn = { plain -> "enc:$plain" },
-            decryptFn = { blob -> blob.removePrefix("enc:") },
+            // Reversed so the blob never contains the plain token (an "enc:$plain"
+            // cipher would, and the no-plaintext assertion could never pass).
+            encryptFn = { plain -> "enc:" + plain.reversed() },
+            decryptFn = { blob -> blob.removePrefix("enc:").reversed() },
         )
 
     private fun pairedStore(allowedChatId: Long = 111L): TelegramStore {
