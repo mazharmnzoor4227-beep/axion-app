@@ -75,22 +75,8 @@ class Agent(
     private val schedules: com.mazharansari.axion.data.SchedulesStore? = null,
     /** v0.12 scheduler: application context so schedule tools can arm WorkManager. */
     private val appCtx: android.content.Context? = null,
-    /** P2-2: the context window this run works inside (cloud default 100k; local = the model's ctx).
-     * The session auto-compacts at 75% instead of dying at the wall. */
-    private val contextBudget: Int = ContextBudget.DEFAULT_BUDGET,
-    /** P2-2: reports the measured context usage (after any compaction) so the chat UI can show it. */
-    private val onContextUsage: (ContextUsage) -> Unit = {},
 ) {
     companion object {
-        /**
-         * P2-9: plugin tools, set by the app at startup from the [PluginRegistry]
-         * (empty until wired in). [defaultTools] appends them, so every surface
-         * that builds an agent — chat, scheduled runs, Telegram — gets the same
-         * registered plugin tools. The sample plugin is NOT registered by
-         * default; it is example code, and registering it is an explicit choice.
-         */
-        var pluginTools: () -> List<Tool> = { emptyList() }
-
         fun defaultTools(): List<Tool> = listOf(
             WebSearchTool(), BrowseTool(), RunCommandTool(), ReadFileTool(), WriteFileTool(), ListFilesTool(),
             ExtractZipTool(), CreatePdfTool(), LoadSkillTool(), InstallSkillsTool(), HttpRequestTool(),
@@ -99,7 +85,7 @@ class Agent(
             BrowserOpenTool(), BrowserReadTool(), BrowserClickTool(), BrowserTypeTool(), BrowserScrollTool(),
             BrowserBackTool(), BrowserForwardTool(), BrowserReloadTool(), BrowserSearchTool(), BrowserScreenshotTool(),
             BrowserTabsTool(), BrowserDownloadsTool(),
-            ShellSessionTool(), ShellResetTool(), RunBackgroundTool(), JobOutputTool(), JobKillTool(), JobRerunTool(),
+            ShellSessionTool(), ShellResetTool(), RunBackgroundTool(), JobOutputTool(), JobKillTool(),
             // v0.10: the learning loop — persistent memory, self-written skills, past-chat search
             MemoryAddTool(), MemoryReplaceTool(), MemoryRemoveTool(), MemoryReadTool(),
             SkillCreateTool(), SkillUpdateTool(), SkillDeleteTool(), SkillViewTool(), SessionSearchTool(),
@@ -113,7 +99,7 @@ class Agent(
             GitHubCloneTool(), GitHubStatusTool(), GitHubBranchTool(), GitHubCommitTool(), GitHubPushTool(), GitHubPrTool(), GitHubCiTool(),
             // P1-2: MCP resources + prompts (read-only context, never instructions)
             McpResourcesTool(), McpReadResourceTool(), McpPromptsTool(), McpGetPromptTool(),
-        ) + pluginTools()
+        )
 
         /** v0.11: while Research mode is on, the model must investigate instead of answering from memory. */
         const val RESEARCH_GUIDANCE = """RESEARCH MODE is ON (the user switched it on in the composer):
@@ -183,16 +169,7 @@ class Agent(
         val followUp = IntentGate.isFollowUp(user.text)
         val hint = ScriptHint.note(user.text, history, followUp)
         // Keep requests small (Groq free tier: 8k tokens/min): recent turns verbatim, everything older → "Session notes" (decisions never dropped).
-        // P2-2: measure the working history against the window, and fold it again with a much tighter
-        // budget when it reaches 75% — a long session compacts itself instead of dying at the wall.
-        // The dropped turns become "Session notes" (the summary handoff) in the system prompt.
-        var folded = HistoryCompressor.compress(history)
-        var usage = ContextBudget.measure(folded, user, contextBudget)
-        if (ContextBudget.shouldCompact(usage)) {
-            folded = HistoryCompressor.compress(history, budgetTokens = contextBudget / ContextBudget.TIGHT_FRACTION, keepRecent = 4)
-            usage = ContextBudget.measure(folded, user, contextBudget)
-        }
-        onContextUsage(usage)
+        val folded = HistoryCompressor.compress(history)
         // v0.10: the memory snapshot rides in EVERY prompt (even small talk — it is how Axion knows the user);
         // the learning guidance is added whenever this turn actually has the memory/skill tools.
         val memBlock = memory?.promptBlock().orEmpty()

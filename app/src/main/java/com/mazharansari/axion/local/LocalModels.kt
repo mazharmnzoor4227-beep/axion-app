@@ -154,10 +154,7 @@ class LocalLlmClient(private val model: File, private val ctx: Int = 4096, priva
                 val h = LocalEngine.session(model, ctx)
                 val msgs = toMessages(req.items, budgetChars = (LlamaNative.contextSize(h) - maxTokens) * 3)
                 val prompt = LlamaNative.applyTemplate(h, msgs.map { it.first }.toTypedArray(), msgs.map { it.second }.toTypedArray())
-                // P2-4: honour an explicit temperature (the local tool-use loop asks for 0.2 so the
-                // small model emits strict JSON); otherwise the usual quick/standard values.
-                val temp = req.temperature?.toFloat()?.coerceIn(0f, 2f) ?: if (req.quick) 0.6f else 0.4f
-                val n = LlamaNative.generate(h, prompt, maxTokens, temp, object : LlamaNative.TokenCallback {
+                val n = LlamaNative.generate(h, prompt, maxTokens, if (req.quick) 0.6f else 0.4f, object : LlamaNative.TokenCallback {
                     override fun onToken(piece: String): Boolean = trySend(LlmEvent.Text(piece)).isSuccess && isActive
                 })
                 if (n == -1) throw LlmException("This chat is too long for the local model's memory (4k). Start a new chat.", FailKind.BAD_REQUEST)

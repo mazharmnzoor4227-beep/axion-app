@@ -11,7 +11,7 @@
 name: Verify Targeted (v0.9.4)
 on:
   push:
-    branches: [axion-v094-composer-fix, axion-baseline-test, axion-roadmap-p0, axion-roadmap-p1, axion-roadmap-p2]
+    branches: [axion-v094-composer-fix, axion-baseline-test, axion-roadmap-p0, axion-roadmap-p1]
   workflow_dispatch:
 jobs:
   test:
@@ -50,12 +50,6 @@ jobs:
       - name: P1 roadmap tests, one by one
         run: |
           for c in P1GitHubTest P1McpTest P1RoadmapTest P1TurboTest P1ReleaseSigningTest BrowserTabsTest BrowserDownloadsTest RetryPolicyTest RunCheckpointTest ScheduledRunDecisionV2Test P1QuotaTokensTest P1VoiceHedgeTest; do
-            echo "===== CLASS $c ====="
-            timeout 480 ./gradlew testDebugUnitTest --no-daemon --tests "com.mazharansari.axion.$c" || { echo "FAILED: $c (exit $?)" >> $GITHUB_STEP_SUMMARY; echo "AXION_CI_FAILED=1" >> $GITHUB_ENV; }
-          done
-      - name: P2 roadmap tests, one by one
-        run: |
-          for c in P2SessionTest P2JobsTest P2LocalToolUseTest P2BuildDemoTest P2CustomVoiceTest P2AgyNextRunTest P2StatusServerTest P2PluginApiTest P2TelegramTest P2DigestTest; do
             echo "===== CLASS $c ====="
             timeout 480 ./gradlew testDebugUnitTest --no-daemon --tests "com.mazharansari.axion.$c" || { echo "FAILED: $c (exit $?)" >> $GITHUB_STEP_SUMMARY; echo "AXION_CI_FAILED=1" >> $GITHUB_ENV; }
           done

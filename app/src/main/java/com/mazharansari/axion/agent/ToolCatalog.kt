@@ -32,7 +32,7 @@ object ToolCatalog {
         ToolGroup("video", "Video editing", "Edits videos on your phone: trim, captions, reel size (9:16), loudness, compress, extract audio, platform presets. Needs Developer tools (Linux).",
             setOf("video_probe", "video_edit"), refusal = "editing videos"),
         ToolGroup("commands", "Run commands", "Runs shell commands in Axion's Linux (Python, Node, ffmpeg …) to build, convert or analyse things: quick commands, a persistent shell session (directory and variables carry over) and background jobs for long work.",
-            setOf("run_command", "shell_session", "shell_reset", "run_background", "job_output", "job_kill", "job_rerun"),
+            setOf("run_command", "shell_session", "shell_reset", "run_background", "job_output", "job_kill"),
             sensitive = true, refusal = "running commands"),
         ToolGroup("skills", "Skills", "Loads your installed skills, installs new ones from GitHub when you share a link, and lets Axion write and improve its own learned skills.", setOf("load_skill", "install_skills_from_github", "skill_create", "skill_update", "skill_delete", "skill_view"), refusal = "using or installing skills"),
         ToolGroup("learning", "Memory & learning", "Axion's persistent memory: it saves your preferences, facts and lessons and recalls them in future chats, and can search your past conversations. Everything it saves is visible in Settings → Memory.",

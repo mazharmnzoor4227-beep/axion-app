@@ -52,8 +52,6 @@ data class AppSettings(
     /** v0.5.3 first run: the intro animation and the permissions screens were shown once. */
     val introShown: Boolean = false,
     val permsShown: Boolean = false,
-    /** P2-8: the read-only status page (localhost only, no control surface). Default OFF. */
-    val statusServer: Boolean = false,
 )
 
 class SettingsStore(ctx: Context) {

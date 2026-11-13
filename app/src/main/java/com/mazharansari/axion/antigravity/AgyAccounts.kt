@@ -36,8 +36,6 @@ data class AgyStore(
     val useInChat: String = "off",
     val model: String = "",
     val models: List<String> = emptyList(),
-    /** P2-7: one-shot per-task pick — the next run uses this account, then the pick is gone and auto-switch resumes. */
-    val nextRunEmail: String? = null,
 )
 
 /** Ported from Kodex AntigravityAuthController: account folder naming (sanitised email + sha256[:16]) and the 3-tier round robin. */
@@ -67,18 +65,6 @@ object AgySelector {
 
     fun earliestBack(accounts: List<AgyAccount>, now: Long): AgyAccount? =
         accounts.filter { it.enabled && it.ineligibleAt == 0L && it.authExpiredAt == 0L && it.cooldownUntil > now }.minByOrNull { it.cooldownUntil }
-
-    /**
-     * P2-7: resolves a one-shot per-task pick. Returns the override account when it
-     * is usable for this run, or null — the caller then falls back to the normal
-     * pick and drops the stale pick, so a dead override never blocks a later run.
-     */
-    fun resolveOneShot(accounts: List<AgyAccount>, nextRunEmail: String?, now: Long, hasToken: (AgyAccount) -> Boolean, exclude: Set<String>): AgyAccount? {
-        val email = nextRunEmail?.takeIf { it.isNotBlank() } ?: return null
-        val acc = accounts.firstOrNull { it.email.equals(email, true) } ?: return null
-        if (acc.email in exclude) return null
-        return if (usable(acc, now, hasToken)) acc else null
-    }
 }
 
 /** Several Google accounts for Antigravity, each with its own credential folder bound into Linux as ~/.gemini/antigravity-cli. */
@@ -172,13 +158,6 @@ class AgyAccounts(private val ctx: Context) {
     }
 
     fun setActive(email: String) = save(_store.value.copy(activeEmail = email))
-    /** P2-7: pick this account for the NEXT task only (one shot). */
-    fun setNextRun(email: String) = save(_store.value.copy(nextRunEmail = email.trim().lowercase()))
-    fun clearNextRun() {
-        if (_store.value.nextRunEmail != null) save(_store.value.copy(nextRunEmail = null))
-    }
-
-    fun nextRun(): AgyAccount? = _store.value.nextRunEmail?.let { e -> _store.value.accounts.firstOrNull { it.email.equals(e, true) } }
     fun setAutoSwitch(on: Boolean) = save(_store.value.copy(autoSwitch = on))
     fun setUseInChat(mode: String) = save(_store.value.copy(useInChat = mode))
     fun setModel(m: String) = save(_store.value.copy(model = m))
@@ -195,19 +174,12 @@ class AgyAccounts(private val ctx: Context) {
     fun remove(email: String) {
         _store.value.accounts.firstOrNull { it.email.equals(email, true) }?.let { folderOf(it).deleteRecursively(); sealedOf(it).delete(); liveOf(it).deleteRecursively() }
         val rest = _store.value.accounts.filterNot { it.email.equals(email, true) }
-        save(_store.value.copy(accounts = rest, activeEmail = if (_store.value.activeEmail.equals(email, true)) rest.firstOrNull()?.email else _store.value.activeEmail, nextRunEmail = if (_store.value.nextRunEmail.equals(email, true)) null else _store.value.nextRunEmail))
+        save(_store.value.copy(accounts = rest, activeEmail = if (_store.value.activeEmail.equals(email, true)) rest.firstOrNull()?.email else _store.value.activeEmail))
     }
 
     /** Which account runs next. Manual mode (auto-switch off) always uses the active one. */
     fun pickForRun(remaining: (AgyAccount) -> Double? = { null }, exclude: Set<String> = emptySet()): AgyAccount? {
         val s = _store.value; val now = System.currentTimeMillis()
-        // P2-7: a one-shot per-task pick wins over the active account and auto-switch — but only
-        // once. It is consumed either way, so a stale pick never blocks a later run.
-        if (s.nextRunEmail != null) {
-            val oneShot = AgySelector.resolveOneShot(s.accounts, s.nextRunEmail, now, ::hasToken, exclude)
-            clearNextRun() // consumed either way — a stale pick never blocks a later run
-            if (oneShot != null) return oneShot
-        }
         if (!s.autoSwitch) return active()?.takeIf { it.email !in exclude && AgySelector.usable(it, now, ::hasToken) }
         val a = active()
         if (a != null && a.email !in exclude && AgySelector.usable(a, now, ::hasToken)) return a
