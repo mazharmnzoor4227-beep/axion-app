@@ -90,8 +90,8 @@ class P1GitHubTest {
             assertEquals("GitHub token", hits.first().kind)
             assertFalse("scrub must not leave the token", SecretScanner.scrub("leaked $t here").contains(t))
         }
-        assertEquals("ghp_ ••••e7f8", GitHubToken.hint(fakeClassic))
-        assertTrue("hint shows only the last 4", GitHubToken.hint(fakeClassic).endsWith("e7f8") && !GitHubToken.hint(fakeClassic).contains("a1b2"))
+        assertEquals("ghp_ ••••e5f6", GitHubToken.hint(fakeClassic))
+        assertTrue("hint shows only the last 4", GitHubToken.hint(fakeClassic).endsWith("e5f6") && !GitHubToken.hint(fakeClassic).contains("a1b2"))
     }
 
     // ── repos ────────────────────────────────────────────────────────────────────────────────────────────────

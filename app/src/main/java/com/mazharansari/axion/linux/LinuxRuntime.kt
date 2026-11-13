@@ -443,12 +443,20 @@ class LinuxRuntime(private val ctx: Context) {
                                 // resolve it the way the filesystem will and refuse it if it escapes.
                                 val resolved = symlinkTarget(target, e.linkName)
                                 require(inside(resolved.canonicalPath)) { "Unsafe symlink target in archive: $name -> ${e.linkName}" }
-                                target.parentFile?.mkdirs(); target.delete(); runCatching { Os.symlink(e.linkName, target.absolutePath) }.getOrElse { java.nio.file.Files.createSymbolicLink(target.toPath(), java.nio.file.Paths.get(e.linkName)) }
+                                target.parentFile?.mkdirs(); target.delete()
+                                // Os.symlink is a silent no-op in JVM unit tests (returnDefaultValues),
+                                // so verify the link really exists and fall back to the NIO call.
+                                val linked = runCatching { Os.symlink(e.linkName, target.absolutePath) }.isSuccess &&
+                                    java.nio.file.Files.isSymbolicLink(target.toPath())
+                                if (!linked) java.nio.file.Files.createSymbolicLink(target.toPath(), java.nio.file.Paths.get(e.linkName))
                             }
                             e.isLink -> {
                                 // Hard-link targets are archive-root-relative; an absolute one used
                                 // to escape File(dest, …) entirely. Same rule as symlinks.
-                                val src = File(dest, e.linkName.removePrefix("./"))
+                                // NOTE: java.io.File(dest, "/abs") does NOT anchor — it concatenates
+                                // the absolute child onto the parent (dest/abs) — so an absolute
+                                // target must be resolved directly, or the escape check is blind.
+                                val src = if (File(e.linkName).isAbsolute) File(e.linkName) else File(dest, e.linkName.removePrefix("./"))
                                 require(inside(src.canonicalPath)) { "Unsafe hard link target in archive: $name -> ${e.linkName}" }
                                 hardLinks += target to src
                             }
@@ -466,7 +474,11 @@ class LinuxRuntime(private val ctx: Context) {
             hardLinks.forEach { (link, src) ->
                 // Re-check now that every entry exists: the source's real location (through any symlink) must still be inside dest.
                 require(inside(src.canonicalPath)) { "Unsafe hard link target in archive: ${src.path}" }
-                link.parentFile?.mkdirs(); link.delete(); runCatching { Os.link(src.absolutePath, link.absolutePath) }.getOrElse { src.copyTo(link, true); link.setExecutable(src.canExecute(), false) }
+                link.parentFile?.mkdirs(); link.delete()
+                // Os.link is a silent no-op in JVM unit tests (returnDefaultValues) — verify
+                // the link really exists and fall back to copying the source's bytes.
+                val linked = runCatching { Os.link(src.absolutePath, link.absolutePath) }.isSuccess && link.exists()
+                if (!linked) { src.copyTo(link, true); link.setExecutable(src.canExecute(), false) }
             }
             onCount(n)
         }

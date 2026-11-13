@@ -126,8 +126,19 @@ object ApprovalGate {
     private fun isReadOnly(cmd: String): Boolean {
         // any chaining / piping / substitution / redirection can hide a second program — gate it
         if (Regex("&&|\\|\\||;|\\||`|\\$\\(|>|<").containsMatchIn(cmd)) return false
-        val program = patternOf(cmd).substringBefore(' ').substringAfterLast('/')
-        return program in READ_ONLY
+        val pattern = patternOf(cmd)
+        val program = pattern.substringBefore(' ').substringAfterLast('/')
+        if (program in READ_ONLY) return true
+        // git is not read-only as a program, but its read-only subcommands are
+        // (status/log/diff/show/branch-list…); anything that writes (push, commit,
+        // checkout, branch -D…) still asks. P1-1: a plain "git status" must run free.
+        if (program == "git") {
+            val rest = pattern.substringAfter(' ', "").trim()
+            val sub = rest.substringBefore(' ')
+            if (sub in setOf("status", "log", "diff", "show", "ls-files", "rev-parse", "describe", "blame", "grep", "ls-remote")) return true
+            if (sub == "branch" && rest.split(Regex("\\s+")).none { it == "-d" || it == "-D" || it == "--delete" }) return true
+        }
+        return false
     }
 
     /** Denylist: returns WHY this always needs a fresh confirmation, or null. Checked before everything. */
