@@ -342,6 +342,19 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                         TextButton(onClick = { vm.dismissInterruptedTask() }) { Text("Dismiss", color = p.text2) }
                     }
                 }
+                // P2-2: measured context usage of the last run — a plain line + thin bar above the composer.
+                // When a long session compacts itself the label says how many turns were folded into session notes.
+                vm.contextUsage?.let { u ->
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
+                        Text(u.label(), style = Type.tiny, color = p.text2, maxLines = 1)
+                        Spacer(Modifier.height(3.dp))
+                        LinearProgressIndicator(progress = { u.percent / 100f }, modifier = Modifier.fillMaxWidth().height(3.dp), color = p.accent, trackColor = p.border)
+                    }
+                }
+                // P2-4: measured speed of the last local-model run.
+                vm.localSpeed?.let { sp ->
+                    Text(sp.label(), style = Type.tiny, color = p.text2, maxLines = 1, modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
+                }
                 // v0.5.2 (mazhar's test): Build never shows the Ask-only key chips — it shows what Build actually needs.
                 if (messages.isEmpty() && !plus && !model && build) BuildChips(ready = vm.buildReady(), onAgy = { navigate(Route.Antigravity) }, onTools = { navigate(Route.DevTools) })
                 else if (messages.isEmpty() && !plus && !model) SuggestionChips(noKeys = connectors.isEmpty(), onConnect = { navigate(Route.Connectors) }, onSkills = { navigate(Route.Skills) }, onBuild = onBuild, onVoice = { navigate(Route.VoiceCall) })
@@ -359,15 +372,26 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                             g.settings.update { it.copy(deepResearch = true, toolSwitches = it.toolSwitches + ("research" to true)) }
                             vm.toast = "Deep research turned back on in Tools library."
                         } else {
-                            g.settings.update { it.copy(deepResearch = !it.deepResearch) }
+                            // A tap must say so: a shade change alone left the user unsure the toggle had worked.
+                            val on = !s.deepResearch
+                            g.settings.update { it.copy(deepResearch = on) }
+                            vm.toast = if (on) "Deep research ON — your next message will use deep research." else "Deep research OFF."
                         }
                     },
                     longTaskOn = settings.longTask,
-                    onLongTask = { g.settings.update { it.copy(longTask = !it.longTask) } },
+                    onLongTask = {
+                        val on = !settings.longTask
+                        g.settings.update { it.copy(longTask = on) }
+                        vm.toast = if (on) "Long task ON — your next message will run as a long task." else "Long task OFF."
+                    },
                     // P1-3 Turbo (server): per-task toggle; off by default, and it only takes
                     // effect when a server is set up in Settings → Turbo (server).
                     turboOn = settings.turbo,
-                    onTurbo = { g.settings.update { it.copy(turbo = !it.turbo) } },
+                    onTurbo = {
+                        val on = !settings.turbo
+                        g.settings.update { it.copy(turbo = on) }
+                        vm.toast = if (on) "Turbo ON — your next task runs on your server." else "Turbo OFF."
+                    },
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 Composer(

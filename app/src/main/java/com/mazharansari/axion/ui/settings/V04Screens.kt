@@ -400,6 +400,7 @@ fun AntigravityScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit,
                             a.authExpiredAt > 0 -> Badge("Sign in again", Amber)
                             a.cooldownUntil > now -> Badge("Limit · back ${timeOf(a.cooldownUntil)}", Amber)
                             !a.enabled -> Badge("Off", p.text3)
+                            a.email.equals(store.nextRunEmail, true) -> Badge("Next task", Amber)
                             a.email.equals(store.activeEmail, true) -> Badge("Active", Green)
                         }
                     }
@@ -441,6 +442,9 @@ fun AntigravityScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit,
             Note(a.email, Modifier.padding(horizontal = 24.dp))
             Spacer(Modifier.height(8.dp))
             com.mazharansari.axion.ui.chat.SheetRow(Gk.check, "Make active", onClick = { g.agy.setActive(a.email); manage = null })
+            // P2-7: one-shot per-task pick — the next run uses this account, then auto-switch resumes.
+            if (a.email.equals(store.nextRunEmail, true)) com.mazharansari.axion.ui.chat.SheetRow(Gk.refresh, "Cancel next-task pick", "Auto-switch picks the next account again", onClick = { g.agy.clearNextRun(); manage = null })
+            else if (a.enabled && a.authExpiredAt == 0L && a.ineligibleAt == 0L && a.cooldownUntil <= System.currentTimeMillis()) com.mazharansari.axion.ui.chat.SheetRow(Gk.check, "Use for the next task only", "The next run uses this account, then auto-switch resumes", onClick = { g.agy.setNextRun(a.email); manage = null })
             com.mazharansari.axion.ui.chat.SheetRow(Gk.refresh, "Check quota now", onClick = { g.agyProbe.probeLater(a); manage = null })
             if (a.authExpiredAt > 0) com.mazharansari.axion.ui.chat.SheetRow(Gk.person, "Sign in again", onClick = { manage = null; showLogin = true; scope.launch { g.agyLogin.begin() } })
             com.mazharansari.axion.ui.chat.SheetRow(if (a.enabled) Gk.eyeOff else Gk.eye, if (a.enabled) "Turn off" else "Turn on", onClick = { g.agy.setEnabled(a.email, !a.enabled); manage = null })
@@ -555,7 +559,7 @@ fun QuotaScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit) {
                 }
                 Spacer(Modifier.height(10.dp))
                 SettingsGroup {
-                    m.agy.forEach { r -> AgyQuotaRow(r, store.activeEmail, probing.contains(r.account.email)) { rawFor = r } }
+                    m.agy.forEach { r -> AgyQuotaRow(r, store.activeEmail, store.nextRunEmail, probing.contains(r.account.email)) { rawFor = r } }
                     SettingsRow(Gk.plus, "Add Antigravity account") { nav(Route.Antigravity) }
                 }
             }
@@ -617,7 +621,7 @@ private fun tokens(n: Long) = when { n >= 1_000_000 -> "%.1fM".format(n / 1e6); 
 private fun Modifier.verticalScrollCompat(): Modifier = this.then(Modifier.verticalScroll(rememberScrollState()))
 
 @Composable
-private fun AgyQuotaRow(r: AgyRow, active: String?, probing: Boolean, onRaw: () -> Unit) {
+private fun AgyQuotaRow(r: AgyRow, active: String?, nextRun: String? = null, probing: Boolean, onRaw: () -> Unit) {
     val p = P; val a = r.account; val now = System.currentTimeMillis()
     val tap = rememberTap(onRaw)
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(p.card).clickable(onClick = tap).padding(horizontal = 16.dp, vertical = 13.dp)) {
@@ -631,6 +635,7 @@ private fun AgyQuotaRow(r: AgyRow, active: String?, probing: Boolean, onRaw: () 
             else when {
                 a.authExpiredAt > 0 -> Badge("Sign-in expired", Amber)
                 a.ineligibleAt > 0 -> Badge("Not eligible", Red)
+                a.email.equals(nextRun, true) -> Text("Next task", style = Type.tiny, color = Amber)
                 a.email.equals(active, true) -> Text("Active", style = Type.tiny, color = Green)
             }
         }

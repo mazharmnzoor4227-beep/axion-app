@@ -125,6 +125,8 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
             SettingsRow(Gk.rocket, "Turbo (server)", subtitle = vm.g.cloud.settings.collectAsState().value.let { if (it.enabled && it.host.isNotBlank()) "On · ${it.hostLabel()}" else "Your own server for long builds" }) { nav(Route.Turbo) }
             SettingsRow(Gk.rocket, "Antigravity", subtitle = vm.g.agy.store.collectAsState().value.accounts.size.let { if (it == 0) "Multi-account, auto-switch" else "$it account${if (it > 1) "s" else ""}" }) { nav(Route.Antigravity) }
             SettingsRow(Gk.usage, "Quota", subtitle = "Used, left and reset times") { nav(Route.Quota) }
+            SettingsRow(Gk.voice, "Telegram control", subtitle = vm.g.telegram.settings.collectAsState().value.let { s -> if (!s.enabled) "Text Axion from anywhere — off by default" else if (s.allowedChatId != 0L) "On · paired chat ${s.allowedChatId}" else "On · waiting for /start to pair" }) { nav(Route.Telegram) }
+            ToggleRow(Gk.globe, "Status page", if (s.statusServer) vm.g.statusServer.url + " — read-only, this phone only" else "A read-only status page on this phone (chats, schedules, quota, jobs)", s.statusServer) { vm.g.setStatusServer(it) }
         }
         SectionLabel("Data & Information")
         SettingsGroup {

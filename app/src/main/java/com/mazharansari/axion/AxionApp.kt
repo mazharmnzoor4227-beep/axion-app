@@ -27,7 +27,15 @@ class AxionApp : Application() {
         // Antigravity sign-in files left readable (an older version, a run cut off by a crash) are encrypted again.
         com.mazharansari.axion.security.SecretScanner.known = { graph.knownSecrets() }
         Thread { runCatching { graph.agy.sealAtRest() }; runCatching { graph.knownSecrets() } }.start()
+        // P2-3: jobs that were still "running" when the app died are interrupted now (their process is gone); their logs stay.
+        Thread { runCatching { graph.jobs.reconcile() } }.start()
         com.mazharansari.axion.voice.ReadAloudPlayer.geminiKeys = { graph.geminiKeys() }
+        com.mazharansari.axion.voice.ReadAloudPlayer.customVoice = { graph.customVoice.current.value }
+        com.mazharansari.axion.agent.Agent.pluginTools = { graph.plugins.allTools() }
+        // P2-1: resume Telegram control after a restart when it was left on.
+        if (graph.telegram.settings.value.enabled) graph.telegramBot.start()
+        // P2-8: resume the read-only status page after a restart when it was left on.
+        if (graph.settings.state.value.statusServer) runCatching { graph.statusServer.start() }
     }
 }
 
@@ -50,6 +58,69 @@ class Graph(val app: Application) {
     /** P1-1 (§6.1): the connected GitHub account (KeyVault-encrypted token) + its audit log. */
     val github by lazy { com.mazharansari.axion.github.GitHubStore(File(app.filesDir, "github")) }
     val speaker by lazy { Speaker(app) }
+    /** P2-1: Telegram bot control — OFF by default; the user supplies his own bot token in Settings. */
+    val telegram by lazy { com.mazharansari.axion.telegram.TelegramStore(app) }
+    private val telegramScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+    val telegramBot by lazy {
+        com.mazharansari.axion.telegram.TelegramBot(
+            telegram,
+            com.mazharansari.axion.telegram.HttpTelegramApi(token = { telegram.token() }),
+            onMessage = { _, text -> com.mazharansari.axion.telegram.TelegramRunner(this).answer(text) },
+            scope = telegramScope,
+        )
+    }
+
+    /** P2-1: turn Telegram control on/off (starting/stopping the poll loop with it). */
+    fun setTelegramEnabled(on: Boolean) {
+        telegram.setEnabled(on)
+        if (on) telegramBot.start() else telegramBot.stop()
+    }
+
+    /** P2-8: read-only status page (localhost only, GET only, no control surface). OFF by default. */
+    val statusServer by lazy {
+        com.mazharansari.axion.status.StatusServer(
+            com.mazharansari.axion.status.StatusProvider { statusSnapshot() },
+        )
+    }
+    private val appStartedAtMs = System.currentTimeMillis()
+
+    /** P2-8: counts and short labels only — no secrets, tokens, file paths or message text, ever. */
+    fun statusSnapshot(): com.mazharansari.axion.status.StatusSnapshot {
+        val records = runCatching { jobs.allRecords() }.getOrDefault(emptyList())
+        val quota = runCatching { quota.model() }.getOrNull()
+        val nextSchedule = schedules.entries.value
+            .filter { it.enabled && it.anchorEpochMs > 0 }
+            .minOfOrNull { it.anchorEpochMs }
+        return com.mazharansari.axion.status.StatusSnapshot(
+            appVersion = com.mazharansari.axion.BuildConfig.VERSION_NAME,
+            chats = chats.index.value.size,
+            schedules = schedules.entries.value.count { it.enabled },
+            nextScheduleAt = nextSchedule,
+            runningJobs = records.count { it.state == com.mazharansari.axion.data.JobState.RUNNING },
+            interruptedJobs = records.count { it.state == com.mazharansari.axion.data.JobState.INTERRUPTED },
+            quotaLines = quota?.let {
+                com.mazharansari.axion.work.DigestBuilder.quotaLines(
+                    it.agyCombined, it.agy.size, it.agyRunsToday, it.totals.left, it.totals.limit, it.agyEarliestReset,
+                )
+            }.orEmpty(),
+            uptimeMs = System.currentTimeMillis() - appStartedAtMs,
+        )
+    }
+
+    /** P2-8: turn the status page on/off (starting/stopping the localhost server with it). */
+    fun setStatusServer(on: Boolean) {
+        settings.update { it.copy(statusServer = on) }
+        if (on) runCatching { statusServer.start() } else runCatching { statusServer.stop() }
+    }
+    /** P2-9: community plugins — the registry rejects duplicate ids, duplicate tool names and collisions with built-ins (including the reserved "mcp_" prefix). The sample plugin is NOT registered by default. */
+    val plugins by lazy {
+        com.mazharansari.axion.agent.PluginRegistry(
+            builtInNames = com.mazharansari.axion.agent.ToolCatalog.groups.flatMap { it.tools }.toSet() +
+                setOf(com.mazharansari.axion.agent.Planner.PLAN_SET, com.mazharansari.axion.agent.Planner.PLAN_UPDATE),
+        )
+    }
+    /** P2-6: the user's own voice slot (a user-supplied voice file/model, used by read-aloud when an engine is installed). */
+    val customVoice by lazy { com.mazharansari.axion.voice.CustomVoiceStore(File(app.filesDir, "custom-voice")) }
     val imageGen by lazy {
         com.mazharansari.axion.agent.ImageGen({
             connectors.list.value.filter { it.enabled }.groupBy { it.providerId }.mapValues { it.value.first().key() }
@@ -62,11 +133,13 @@ class Graph(val app: Application) {
     // v0.4 — Linux (PRoot), developer tools, Antigravity accounts, quota.
     val linux by lazy { com.mazharansari.axion.linux.LinuxRuntime(app) }
     val devtools by lazy { com.mazharansari.axion.linux.DevTools(app, linux) }
+    /** P2-3 (ME-16): persisted background-job records, so a force-stop/reboot shows jobs as interrupted instead of losing them. */
+    val jobRecords by lazy { com.mazharansari.axion.data.JobRecordStore(File(app.filesDir, "job-records")) }
     // v0.9 — Axion's own browser (one shared WebView for the Browser screen + the agent) and the terminal:
     // one persistent shell session + background jobs, both on the same PRoot Ubuntu.
     val browser by lazy { com.mazharansari.axion.browser.BrowserController(app) }
     val shell by lazy { com.mazharansari.axion.linux.ShellSession(linux) }
-    val jobs by lazy { com.mazharansari.axion.linux.BackgroundJobs(app, linux) }
+    val jobs by lazy { com.mazharansari.axion.linux.BackgroundJobs(app, linux, jobRecords) }
     val agy by lazy { com.mazharansari.axion.antigravity.AgyAccounts(app) }
     val agyLogin by lazy { com.mazharansari.axion.antigravity.AgyLogin(linux, agy) }
     val quota by lazy {

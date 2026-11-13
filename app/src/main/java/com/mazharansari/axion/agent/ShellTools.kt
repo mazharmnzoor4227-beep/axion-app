@@ -92,17 +92,29 @@ class RunBackgroundTool : Tool {
 class JobOutputTool : Tool {
     override val spec = ToolSpec(
         "job_output",
-        "Check a background job started with run_background: whether it is still running, its exit code when finished, and the latest output.",
+        "Check a background job started with run_background: whether it is still running, its exit code when finished, and the latest output. Jobs from an earlier app session are found too — a job the app lost (force-stop / reboot) shows as INTERRUPTED with its kept log.",
         schema { int("job_id", "The job number from run_background") },
     )
     override fun label(args: JsonObject) = StepLabel(StepKind.COMMAND, "Job output", args.i("job_id")?.let { "#$it" } ?: "")
     override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput {
         val id = args.i("job_id") ?: return ToolOutput("Give the job_id from run_background.", isError = true)
-        val job = jobs().get(id) ?: return ToolOutput("No background job #$id in this app session.", isError = true)
-        val status = if (job.alive()) "RUNNING (started ${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date(job.startedAt))})"
-            else "FINISHED, exit code ${job.exitCode() ?: "?"}"
-        val tail = job.tail().ifEmpty { "(no output yet)" }
-        return ToolOutput("Job #${job.id} — $status\nCommand: ${job.command}\nOutput:\n$tail", doneTitle = "Job #${job.id} ${if (job.alive()) "running" else "finished"}")
+        val job = jobs().get(id)
+        if (job != null) {
+            val status = if (job.alive()) "RUNNING (started ${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date(job.startedAt))})"
+                else "FINISHED, exit code ${job.exitCode() ?: "?"}"
+            val tail = job.tail().ifEmpty { "(no output yet)" }
+            return ToolOutput("Job #${job.id} — $status\nCommand: ${job.command}\nOutput:\n$tail", doneTitle = "Job #${job.id} ${if (job.alive()) "running" else "finished"}")
+        }
+        // P2-3: no live process — fall back to the persisted record (a job from before the app was killed).
+        val rec = jobs().record(id) ?: return ToolOutput("No background job #$id.", isError = true)
+        val tail = jobs().logTail(rec).ifEmpty { "(no output yet)" }
+        val state = when (rec.state) {
+            com.mazharansari.axion.data.JobState.INTERRUPTED -> "INTERRUPTED — the app was stopped while it ran (force-stop or reboot). Its log is kept below; run it again with job_rerun (job_id $id)."
+            com.mazharansari.axion.data.JobState.DONE -> "FINISHED, exit code ${rec.exitCode ?: "?"}"
+            com.mazharansari.axion.data.JobState.FAILED -> "FAILED, exit code ${rec.exitCode ?: "?"} — run it again with job_rerun (job_id $id)."
+            else -> "RUNNING"
+        }
+        return ToolOutput("Job #${rec.id} — $state\nCommand: ${rec.command}\nOutput:\n$tail", doneTitle = "Job #${rec.id} ${rec.state}")
     }
 }
 
@@ -118,5 +130,22 @@ class JobKillTool : Tool {
         val job = jobs().get(id) ?: return ToolOutput("No background job #$id in this app session.", isError = true)
         jobs().kill(job)
         return ToolOutput("Job #${job.id} stopped.", doneTitle = "Job stopped")
+    }
+}
+
+/** P2-3: run a finished, failed or interrupted background job again (same command, new job number). */
+class JobRerunTool : Tool {
+    override val spec = ToolSpec(
+        "job_rerun",
+        "Run a finished, failed or interrupted background job again with the same command (it gets a new job number). Check what happened first with job_output. A job that is still running cannot be re-run — stop it with job_kill first.",
+        schema { int("job_id", "The job number from run_background / job_output") },
+    )
+    override fun label(args: JsonObject) = StepLabel(StepKind.COMMAND, "Re-run job", args.i("job_id")?.let { "#$it" } ?: "")
+    override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput {
+        val id = args.i("job_id") ?: return ToolOutput("Give the job_id from run_background.", isError = true)
+        return try {
+            val job = jobs().reRun(id) ?: return ToolOutput("Job #$id cannot be re-run (unknown, or still running).", isError = true)
+            ToolOutput("Re-ran job #$id as new job #${job.id}: ${job.command}\nCheck it with job_output (job_id ${job.id}).", doneTitle = "Job #${job.id} started")
+        } catch (e: Throwable) { ToolOutput("Could not re-run the job: ${e.message}", isError = true) }
     }
 }

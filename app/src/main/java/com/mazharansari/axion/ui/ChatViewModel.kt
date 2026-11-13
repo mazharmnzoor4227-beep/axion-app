@@ -68,6 +68,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── v0.12 long tasks: a run the app lost mid-way (killed / crashed) is surfaced, not silently gone ─────────────
     var interruptedTask by mutableStateOf<com.mazharansari.axion.data.TaskRunRecord?>(null); private set
+    /** P2-2: measured context usage of the open conversation's last run (null = no run yet). Shown above the composer. */
+    var contextUsage by mutableStateOf<com.mazharansari.axion.agent.ContextUsage?>(null); private set
+    /** P2-4: measured speed of the last local-model run (null = no local run yet). Shown above the composer. */
+    var localSpeed by mutableStateOf<com.mazharansari.axion.local.LocalSpeed?>(null); private set
     init {
         viewModelScope.launch {
             val rec = g.taskRuns.current.value
@@ -75,7 +79,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun dismissInterruptedTask() { interruptedTask = null; g.taskRuns.clear() }
-    fun resumeInterruptedTask() { interruptedTask?.let { open(it.conversationId) }; interruptedTask = null }
+    /** P2-2: reopen the interrupted chat AND pre-fill the continue prompt — the user taps Send to resume from the TaskRuns record. */
+    fun resumeInterruptedTask() {
+        interruptedTask?.let { rec -> open(rec.conversationId); if (rec.goal.isNotBlank()) draft = com.mazharansari.axion.agent.ContextBudget.resumeDraft(rec.goal) }
+        interruptedTask = null
+    }
     var debugOpenFile by mutableStateOf<String?>(null)
     var debugEditing by mutableStateOf(false)
     var debugDeploySheet by mutableStateOf(false)
@@ -147,6 +155,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun newChat(into: Section = section) {
         // v0.8.0: no stop() — a run in the chat being left keeps working in the background.
         conversationId = null; title = ""; messages = emptyList(); pending.clear(); draft = ""; section = into
+        contextUsage = null   // P2-2: the indicator belongs to the conversation just left
         if (into != Section.BUILD) projectId = null
         refreshRunning()
     }
@@ -555,12 +564,26 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val pid = sess.pid
                 if (sec == Section.BUILD && pid != null) withContext(Dispatchers.Default) { runBuildTurn(pid, u, sink) }
                 else withContext(Dispatchers.Default) {
-                    Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn,
-                        approvals = g.approvals, approver = approver, longTask = longTaskOn, turbo = turboOn, schedules = g.schedules, appCtx = getApplication()).run(
-                        history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }) }, sink = sink,
-                        profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
-                        intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools
-                    )
+                    // P2-2: the run measures its context usage against the real window (local model ctx
+                    // when LOCAL mode is on) and reports it so the chat shows a context indicator.
+                    val ctxBudget = if (s.mode == "LOCAL") {
+                        val localId = runCatching { g.connectors.local()?.localModel }.getOrNull()
+                        com.mazharansari.axion.local.LocalModel.byId(localId)?.ctx?.let { com.mazharansari.axion.agent.ContextBudget.forLocal(it) }
+                            ?: com.mazharansari.axion.agent.ContextBudget.DEFAULT_BUDGET
+                    } else com.mazharansari.axion.agent.ContextBudget.DEFAULT_BUDGET
+                    if (s.mode == "LOCAL" && intent == com.mazharansari.axion.agent.Intent.ACTION) {
+                        // P2-4: the on-device model drives file/shell tools itself (JSON tool calls)
+                        // instead of answering chat-only. The final answer streams through the sink.
+                        sink.text(runLocalToolTurn(history, userItem, sink))
+                    } else {
+                        Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn,
+                            approvals = g.approvals, approver = approver, longTask = longTaskOn, turbo = turboOn, schedules = g.schedules, appCtx = getApplication(),
+                            contextBudget = ctxBudget, onContextUsage = { u -> viewModelScope.launch(Dispatchers.Main.immediate) { contextUsage = u } }).run(
+                            history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }) }, sink = sink,
+                            profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
+                            intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools
+                        )
+                    }
                 }
             } catch (e: CancellationException) { status = MsgStatus.INTERRUPTED }
             catch (e: NoModelException) { status = MsgStatus.ERROR; error = e.message.orEmpty() }
@@ -586,6 +609,39 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (status == MsgStatus.DONE && s.autoRead) sess.msgs.firstOrNull { it.id == aid }?.let { speak(it) }
             }
         }
+    }
+
+    /**
+     * P2-4: LOCAL mode + an action request — the on-device model runs the tool loop itself
+     * (LocalAgentRunner: JSON tool calls for file/shell tools) instead of the cloud agent.
+     * Returns the final answer text; the measured speed lands in [localSpeed] for the chat UI.
+     */
+    private suspend fun runLocalToolTurn(history: List<ChatItem>, user: UserItem, sink: AgentSink): String {
+        val modelId = runCatching { g.connectors.local()?.localModel }.getOrNull()
+            ?: throw NoModelException("Local mode is on but no local model is set up. Download one in Connectors → Local model.")
+        val model = com.mazharansari.axion.local.LocalModel.byId(modelId)
+            ?: throw NoModelException("Local model \"$modelId\" is not known. Pick one in Connectors → Local model.")
+        val file = g.localModels.file(model)
+        if (!file.isFile) throw NoModelException("The local model file is missing. Download it again in Connectors → Local model.")
+        val client = com.mazharansari.axion.local.LocalLlmClient(file, ctx = model.ctx)
+        val tools = Agent.defaultTools().filter { it.spec.name in com.mazharansari.axion.local.LocalToolUse.ALLOWED_TOOLS }
+        val ctx = ToolContext(g.workspace, g.skills, memory = g.memory, chats = g.chats, schedules = g.schedules, appCtx = getApplication())
+        val runner = com.mazharansari.axion.local.LocalAgentRunner(
+            generate = { items ->
+                val t0 = System.currentTimeMillis()
+                val sb = StringBuilder()
+                client.stream(LlmRequest(modelId, items, temperature = 0.2)).collect { ev ->
+                    if (ev is LlmEvent.Text) sb.append(ev.delta)
+                }
+                val ms = System.currentTimeMillis() - t0
+                com.mazharansari.axion.local.LocalGeneration(sb.toString(), ms, com.mazharansari.axion.local.LocalToolUse.approxTokens(sb.length))
+            },
+            tools = tools, ctx = ctx, approvals = g.approvals, sink = sink,
+        )
+        val result = runner.run(history, user)
+        viewModelScope.launch(Dispatchers.Main.immediate) { localSpeed = result.speed }
+        sink.model("${model.title} · ${"%.1f".format(result.speed.tokPerSec)} tok/s")
+        return result.answer
     }
 
     /**

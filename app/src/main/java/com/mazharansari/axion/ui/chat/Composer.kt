@@ -150,40 +150,48 @@ private fun SendButton(state: Int, onSend: () -> Unit, onStop: () -> Unit, onVoi
     }
 }
 
+/**
+ * Composer tool toggle. The ON state must be unmistakable at a glance: accent fill,
+ * on-accent text/icons AND a check mark — a shade change alone is not enough to tell
+ * (the user could not tell whether a tap had actually turned a toggle on). OFF is a
+ * bordered chip, never a flat blob, so it still reads as a button.
+ */
+@Composable
+private fun ToolChip(icon: Int, label: String, on: Boolean, onClick: () -> Unit) {
+    val p = P; val tap = rememberTap(onClick)
+    Row(
+        Modifier.height(36.dp).clip(RoundedCornerShape(50))
+            .background(if (on) p.accent else p.chip)
+            .border(1.dp, if (on) p.accent else p.border, RoundedCornerShape(50))
+            .clickable(onClick = tap).padding(start = 12.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GkIcon(icon, null, 17.dp, if (on) p.onAccent else p.text2)
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = if (on) p.onAccent else p.text)
+        if (on) {
+            Spacer(Modifier.width(6.dp))
+            GkIcon(Gk.check, "$label on", 16.dp, p.onAccent)
+        }
+    }
+}
+
 /** v0.11: the Deep Research toggle — filled with the accent colour while on, so the mode is visible at a glance. */
 @Composable
 private fun ResearchChip(on: Boolean, onClick: () -> Unit) {
-    val p = P; val tap = rememberTap(onClick)
-    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(if (on) p.accent else p.chip).clickable(onClick = tap).padding(start = 12.dp, end = 12.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        GkIcon(Gk.search, null, 17.dp, if (on) p.onAccent else p.text2)
-        Spacer(Modifier.width(6.dp))
-        Text("Research", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = if (on) p.onAccent else p.text)
-    }
+    ToolChip(Gk.search, "Research", on, onClick)
 }
 
 /** v0.12: the Long task toggle — same chip family as Research: accent-filled while on. */
 @Composable
 private fun LongTaskChip(on: Boolean, onClick: () -> Unit) {
-    val p = P; val tap = rememberTap(onClick)
-    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(if (on) p.accent else p.chip).clickable(onClick = tap).padding(start = 12.dp, end = 12.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        GkIcon(Gk.clock, null, 17.dp, if (on) p.onAccent else p.text2)
-        Spacer(Modifier.width(6.dp))
-        Text("Long task", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = if (on) p.onAccent else p.text)
-    }
+    ToolChip(Gk.clock, "Long task", on, onClick)
 }
 
 /** P1-3: the Turbo (server) toggle — same chip family as Research: accent-filled while on. */
 @Composable
 private fun TurboChip(on: Boolean, onClick: () -> Unit) {
-    val p = P; val tap = rememberTap(onClick)
-    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(if (on) p.accent else p.chip).clickable(onClick = tap).padding(start = 12.dp, end = 12.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        GkIcon(Gk.rocket, null, 17.dp, if (on) p.onAccent else p.text2)
-        Spacer(Modifier.width(6.dp))
-        Text("Turbo", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = if (on) p.onAccent else p.text)
-    }
+    ToolChip(Gk.rocket, "Turbo", on, onClick)
 }
 
 /**
@@ -194,7 +202,7 @@ private fun TurboChip(on: Boolean, onClick: () -> Unit) {
  */
 @Composable
 fun ToolsRow(researchOn: Boolean, onResearch: () -> Unit, longTaskOn: Boolean, onLongTask: () -> Unit, turboOn: Boolean = false, onTurbo: () -> Unit = {}, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ResearchChip(researchOn, onResearch)
         LongTaskChip(longTaskOn, onLongTask)
         TurboChip(turboOn, onTurbo)
