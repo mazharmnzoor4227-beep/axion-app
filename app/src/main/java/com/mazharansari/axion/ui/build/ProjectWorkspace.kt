@@ -323,11 +323,80 @@ private fun PreviewTab(vm: ChatViewModel, project: Project, onPublish: () -> Uni
         } else {
             ApkCard(vm, project, jobs["${project.id}:apk"], jobs["${project.id}:apk-release"])
         }
+        DemoCard(vm)
         Spacer(Modifier.height(40.dp))
     }
 }
 
 private fun android.graphics.Bitmap.asImageBitmapSafe() = runCatching { this.asImageBitmap() }.getOrNull()
+
+/**
+ * P2-5 (one-tap build demo): after a Builder run, one tap records a short screen
+ * video of the build + preview and shares it. The video is recorded on this phone
+ * with MediaProjection — nothing is uploaded and nothing is faked: if the system
+ * refuses or the recording fails, the card says so instead of showing a video.
+ */
+@Composable
+private fun DemoCard(vm: ChatViewModel) {
+    val p = P; val ctx = LocalContext.current
+    var state by remember { mutableStateOf(DemoState.IDLE) }
+    var lastFile by remember { mutableStateOf<File?>(null) }
+    var seenRecording by remember { mutableStateOf<com.mazharansari.axion.build.DemoRecording?>(null) }
+    var seenError by remember { mutableStateOf<String?>(null) }
+    val lastRecording by BuildDemo.lastRecording.collectAsState()
+    val lastError by BuildDemo.lastError.collectAsState()
+    // The service finishes while this card is on screen: offer the share sheet.
+    LaunchedEffect(lastRecording) {
+        val rec = lastRecording
+        if (rec != null && rec != seenRecording) {
+            seenRecording = rec; lastFile = rec.file; state = DemoState.READY
+        }
+    }
+    LaunchedEffect(lastError) {
+        val err = lastError
+        if (err != null && err != seenError) {
+            seenError = err; state = DemoState.ERROR; vm.toast = err
+        }
+    }
+    val captureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+            BuildDemo.startRecording(ctx, result.resultCode, result.data!!)
+            state = DemoState.RECORDING
+        } else {
+            state = DemoState.IDLE
+            vm.toast = "Screen recording was not allowed."
+        }
+    }
+    Column(Modifier.padding(horizontal = 16.dp).padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(p.card).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            GkIcon(Gk.play, null, 20.dp, p.text); Spacer(Modifier.width(10.dp))
+            Text("Build demo video", style = Type.row, color = p.text, modifier = Modifier.weight(1f))
+        }
+        Text("Record the screen while this app is built and previewed, then share the video. The video is recorded on this phone; nothing is uploaded.", style = Type.small, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(12.dp))
+        when (state) {
+            DemoState.RECORDING -> {
+                BigButton("Stop & share") { BuildDemo.stopRecording(ctx) }
+                Text("Recording… tap Stop & share when the demo is done (max 2 minutes).", style = Type.tiny, color = p.text2, modifier = Modifier.padding(top = 8.dp))
+            }
+            DemoState.READY -> {
+                Text("Recorded ${lastFile?.name ?: "video"} — tap Share to send it.", style = Type.small, color = p.text2)
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    BigButton("Share video", modifier = Modifier.weight(1f)) { lastFile?.let { f -> runCatching { ctx.startActivity(android.content.Intent.createChooser(BuildDemo.shareIntent(ctx, f), "Share demo video").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } } } }
+                    BigButton("Record again", modifier = Modifier.weight(1f)) { state = DemoState.IDLE; runCatching { captureLauncher.launch(BuildDemo.captureIntent(ctx)) }.onFailure { vm.toast = "Screen recording is not available on this phone." } }
+                }
+            }
+            else -> BigButton("Record demo") {
+                state = DemoState.WAITING_PERMISSION
+                runCatching { captureLauncher.launch(BuildDemo.captureIntent(ctx)) }.onFailure {
+                    state = DemoState.IDLE
+                    vm.toast = "Screen recording is not available on this phone."
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun PublishCard(vm: ChatViewModel, project: Project, job: JobState?, onPublish: () -> Unit) {

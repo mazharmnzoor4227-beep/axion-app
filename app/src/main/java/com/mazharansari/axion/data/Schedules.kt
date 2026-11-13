@@ -70,6 +70,12 @@ data class ScheduleEntry(
      * retries (0..5), with exponential backoff between them. Default 2.
      */
     val maxRetries: Int = 2,
+    /**
+     * P2-11 — a daily briefing entry: the worker composes the briefing (overnight
+     * research, repo CI status, quota left) instead of running the agent on the
+     * prompt. False for every ordinary schedule.
+     */
+    val digest: Boolean = false,
 ) {
     /** "Daily at 09:00" / "Every Monday at 09:00" / "Once, 12 Nov 2026 at 09:00". */
     fun describe(): String {

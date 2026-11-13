@@ -45,7 +45,9 @@ import com.mazharansari.axion.voice.LiveVoiceCall
 import com.mazharansari.axion.voice.AxVoice
 import com.mazharansari.axion.voice.VoiceFamily
 import com.mazharansari.axion.voice.VoiceCatalog
+import com.mazharansari.axion.voice.installCustomVoice
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
@@ -66,6 +68,16 @@ fun VoiceCallScreen(vm: ChatViewModel, back: () -> Unit, openConnectors: () -> U
     var voiceOpen by remember { mutableStateOf(false) }
     var turnsAnyway by remember { mutableStateOf(false) }
     var voiceId by remember { mutableStateOf(VoicePrefs.activeVoice(ctx).id) }
+    // P2-6: the user's own voice slot (a user-supplied voice file/model).
+    val customVoice by vm.g.customVoice.current.collectAsState()
+    val scope = rememberCoroutineScope()
+    val pickVoice = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val err = installCustomVoice(ctx, uri, vm.g.customVoice)
+            vm.toast = err ?: "Your own voice is set up."
+        }
+    }
     val activeVoice = VoiceCatalog.byId(voiceId)
     val keys = vm.g.connectors.list.collectAsState().value.filter { it.enabled && it.providerId == "gemini" }
     // v0.4 (mazhar 2:09 PM: "I don't want speak → transcribe → think → answer, I want a LIVE call: I talk, the reply comes
@@ -118,6 +130,14 @@ fun VoiceCallScreen(vm: ChatViewModel, back: () -> Unit, openConnectors: () -> U
     }
     if (voiceOpen) AxionSheet({ voiceOpen = false }) {
         Text("Voice", style = Type.header.copy(fontSize = 18.sp), color = p.text, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp))
+        // P2-6: your own voice slot — a user-supplied voice file/model. The clone itself is a
+        // separate workstream; this only holds the file until a voice engine can use it.
+        SheetRow(Gk.voice, "Your own voice", customVoice?.let { "${it.name} · set up — read-aloud uses it once a voice engine is installed" } ?: "Not set up — add a recording or voice model file",
+            onClick = { if (customVoice == null) pickVoice.launch(arrayOf("*/*")) }) {
+            if (customVoice != null) GkIcon(Gk.check, "Set up", 22.dp, p.text)
+        }
+        if (customVoice != null) SheetRow(Gk.trash, "Remove your own voice", "Read-aloud goes back to the voice above",
+            onClick = { vm.g.customVoice.clear(); voiceOpen = false; vm.toast = "Your own voice was removed." })
         LazyColumn(Modifier.heightIn(max = 520.dp)) {
             items(VoiceCatalog.kodex + VoiceCatalog.natural + VoiceCatalog.gemini, key = { it.id }) { v ->
                 SheetRow(Gk.voice, v.name, when (v.family) {

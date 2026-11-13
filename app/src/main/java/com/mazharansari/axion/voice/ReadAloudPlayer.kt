@@ -80,6 +80,9 @@ object ReadAloudPlayer {
 
     /** Gemini keys from Connectors (set by the app); Gemini voices need one. */
     var geminiKeys: () -> List<String> = { emptyList() }
+
+    /** P2-6: the user's own voice slot (set by the app); null when nothing is set up. */
+    var customVoice: () -> CustomVoice? = { null }
     private var geminiPlayer: com.mazharansari.axion.livecall.LiveAudioPlayer? = null
     private val missingNoticeShown = HashSet<String>()
 
@@ -99,29 +102,55 @@ object ReadAloudPlayer {
         lastNotice = null
         speed = VoicePrefs.speed(app)
         val chosen = voiceOverride ?: VoicePrefs.activeVoice(app)
-        playJob = scope.launch {
-            var voice = chosen
-            if (voice.family == VoiceFamily.GEMINI && geminiKeys().isEmpty()) {
-                postNotice(app, "${voice.name} is a Gemini voice — add a Gemini key in Connectors. Using Rounded this time.")
-                voice = VoiceCatalog.kodex.first()
+        // P2-6: the user's own voice slot (see CustomVoice.kt). A set voice + a registered
+        // engine reads the answer in the user's own voice; a set voice with no engine yet
+        // falls through to the picked voice with one honest notice — never a fake clone.
+        val custom = customVoice()
+        if (custom != null && File(custom.filePath).let { it.isFile && it.length() > 0 }) {
+            val engine = CustomVoiceEngines.engine
+            if (engine != null && engine.canSpeak(custom)) {
+                playJob = scope.launch {
+                    val ok = runCatching { engine.speak(app, custom, plain) }.getOrDefault(false)
+                    if (ok) {
+                        provenance = "Your voice · ${custom.name}"
+                        finish(my)
+                    } else {
+                        postNotice(app, "Your voice could not read this — reading in ${chosen.name} instead.")
+                        speakWithChain(app, chosen, plain, my)
+                    }
+                }
+                return
             }
-            // v0.4: the picked voice reads the answer; only an English phone voice + Urdu/Hindi script gets a same-gender stand-in.
-            VoiceRouting.plan(voice, plain).let { pl ->
-                if (pl.note != null) { lastNotice = pl.note; noticeSeq++; if (missingNoticeShown.add("script:" + voice.id)) postNotice(app, pl.note) }
-                voice = pl.voice
+            if (missingNoticeShown.add("custom-voice-no-engine")) {
+                postNotice(app, "Your own voice is set up, but no voice engine for it is installed yet — reading in ${chosen.name} instead.")
             }
-            // P1-11: Edge stays primary; a failed Edge route falls back to the same voice's Gemini counterpart
-            // (when a Gemini key is available), and everything ends on the phone's Rounded voice.
-            val chain = VoiceCatalog.voiceFallbackChain(voice, geminiKeys().isNotEmpty())
-            var ok = false
-            for ((idx, candidate) in chain.withIndex()) {
-                if (idx > 0) postNotice(app, "${chain[idx - 1].name} (${routeLabel(chain[idx - 1])}) didn't answer — reading in ${candidate.name} (${routeLabel(candidate)}) instead.")
-                ok = runTransport(app, candidate, plain, my)
-                if (ok || session != my) break
-            }
-            if (!ok && session == my) postNotice(app, "${chain.last().name} didn't answer either.")
-            finish(my)
         }
+        playJob = scope.launch { speakWithChain(app, chosen, plain, my) }
+    }
+
+    /** The normal read-aloud chain: picked voice, Edge → Gemini twin → phone fallback. */
+    private suspend fun speakWithChain(app: Context, chosen: AxVoice, plain: String, my: Int) {
+        var voice = chosen
+        if (voice.family == VoiceFamily.GEMINI && geminiKeys().isEmpty()) {
+            postNotice(app, "${voice.name} is a Gemini voice — add a Gemini key in Connectors. Using Rounded this time.")
+            voice = VoiceCatalog.kodex.first()
+        }
+        // v0.4: the picked voice reads the answer; only an English phone voice + Urdu/Hindi script gets a same-gender stand-in.
+        VoiceRouting.plan(voice, plain).let { pl ->
+            if (pl.note != null) { lastNotice = pl.note; noticeSeq++; if (missingNoticeShown.add("script:" + voice.id)) postNotice(app, pl.note) }
+            voice = pl.voice
+        }
+        // P1-11: Edge stays primary; a failed Edge route falls back to the same voice's Gemini counterpart
+        // (when a Gemini key is available), and everything ends on the phone's Rounded voice.
+        val chain = VoiceCatalog.voiceFallbackChain(voice, geminiKeys().isNotEmpty())
+        var ok = false
+        for ((idx, candidate) in chain.withIndex()) {
+            if (idx > 0) postNotice(app, "${chain[idx - 1].name} (${routeLabel(chain[idx - 1])}) didn't answer — reading in ${candidate.name} (${routeLabel(candidate)}) instead.")
+            ok = runTransport(app, candidate, plain, my)
+            if (ok || session != my) break
+        }
+        if (!ok && session == my) postNotice(app, "${chain.last().name} didn't answer either.")
+        finish(my)
     }
 
     // ------------------------------------------------------------------ v0.3.1 transport (Grok's read-aloud pill)

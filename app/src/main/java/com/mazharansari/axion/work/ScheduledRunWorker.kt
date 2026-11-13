@@ -120,6 +120,9 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
         }
         if (!entry.enabled) return Result.failure()
 
+        // P2-11: a digest entry composes the briefing instead of running the agent.
+        if (entry.digest) return runDigestEntry(g, entry)
+
         // P1-8: a run split across invocations resumes from its checkpoint.
         val checkpointStore = ScheduleCheckpointStore(applicationContext)
         val checkpoint = checkpointStore.load(id)
@@ -280,6 +283,29 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
             ScheduledRunResult.SUCCESS -> Result.success()
             ScheduledRunResult.RETRY -> Result.retry()
             ScheduledRunResult.FAILURE -> Result.failure()
+        }
+    }
+
+    /**
+     * P2-11: a digest entry never runs the agent — it composes the daily briefing
+     * (overnight research, repo CI status, quota left) from real state, saves it
+     * as a new chat and notifies, exactly like any other terminal run. A briefing
+     * that cannot be composed still saves a chat saying so; a save failure is a
+     * recorded failure, never silence.
+     */
+    private suspend fun runDigestEntry(g: Graph, entry: ScheduleEntry): Result {
+        val now = System.currentTimeMillis()
+        val text = runCatching { DigestComposer(g).compose() }.getOrElse {
+            "Daily briefing — ${java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.ENGLISH).format(java.util.Date(now))}\n\nThe briefing could not be put together: ${it.message ?: "unknown error"}"
+        }
+        return try {
+            saveRunChat(g, entry, text, emptyList(), "", now)
+            g.schedules.markRan(entry.id, "done")
+            notify(applicationContext, entry.title, "Your daily briefing is ready.", ok = true, id = entry.id.hashCode())
+            Result.success()
+        } catch (e: Throwable) {
+            runCatching { g.schedules.recordFailure(entry.id, entry.title, "The briefing could not be saved: ${e.message ?: "unknown error"}") }
+            Result.failure()
         }
     }
 

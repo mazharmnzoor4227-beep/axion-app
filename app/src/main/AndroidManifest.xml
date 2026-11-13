@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -61,6 +62,8 @@
             </intent-filter>
         </activity>
         <service android:name=".linux.DevToolsService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <!-- P2-5: one-tap build demo — screen recording via MediaProjection. -->
+        <service android:name=".build.DemoRecordService" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <!-- v0.8.0 Phase C: keeps chat/Build runs alive in the background while the RunRegistry has work in flight -->
         <service android:name=".work.WorkService" android:exported="false" android:foregroundServiceType="dataSync" />
         <!-- P1-8: receives exact alarms for scheduled tasks and hands the run to the worker at once (explicit intents only) -->

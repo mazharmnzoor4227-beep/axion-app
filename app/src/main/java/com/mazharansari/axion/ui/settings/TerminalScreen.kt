@@ -55,6 +55,8 @@ fun TerminalScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
     val transcript by shell.transcript.collectAsState()
     val busy by shell.busy.collectAsState()
     val cwd by shell.cwdFlow.collectAsState()
+    /** P2-3: persisted background jobs (survive a force-stop / reboot) with re-run. */
+    val jobRecords by g.jobRecords.records.collectAsState()
     val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
     val scroll = rememberScrollState()
@@ -86,6 +88,32 @@ fun TerminalScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
                 style = Type.mono, color = P.text,
                 modifier = Modifier.fillMaxSize().verticalScroll(scroll),
             )
+        }
+        // P2-3: background jobs that outlived the app process. An interrupted job (force-stop /
+        // reboot while it ran) keeps its log and offers Re-run; running jobs are checked in the chat.
+        if (jobRecords.isNotEmpty()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                Text("Background jobs", style = Type.small, color = P.text2)
+                jobRecords.takeLast(4).reversed().forEach { rec ->
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("#${rec.id} · ${rec.command}", style = Type.tiny, color = P.text, maxLines = 1)
+                            Text(
+                                when (rec.state) {
+                                    com.mazharansari.axion.data.JobState.INTERRUPTED -> "Interrupted — the app was stopped while it ran. Log kept."
+                                    com.mazharansari.axion.data.JobState.FAILED -> "Failed (exit code ${rec.exitCode ?: "?"})"
+                                    com.mazharansari.axion.data.JobState.DONE -> "Finished (exit code 0)"
+                                    else -> "Running…"
+                                }, style = Type.tiny, color = P.text2, maxLines = 1)
+                        }
+                        if (rec.state == com.mazharansari.axion.data.JobState.INTERRUPTED || rec.state == com.mazharansari.axion.data.JobState.FAILED) {
+                            TextButton(onClick = { scope.launch(kotlinx.coroutines.Dispatchers.IO) { g.jobs.reRun(rec.id) } }) {
+                                Text("Re-run", style = Type.small, color = P.accent)
+                            }
+                        }
+                    }
+                }
+            }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(

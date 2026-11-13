@@ -38,9 +38,11 @@ sealed interface Route {
     data object Turbo : Route
     // P1-1 — in-app GitHub coding agent
     data object GitHub : Route
+    // P2-1 — Telegram bot control (a bot token is typed here)
+    data object Telegram : Route
 }
 
 /** v0.5.2: routes shown with FLAG_SECURE (a key, token or password can be typed or shown on them). */
 object SecureRoutes {
-    val all: Set<Route> = setOf(Route.Connectors, Route.CustomConnector, Route.Skills, Route.KeyBackup, Route.MyServer, Route.Antigravity, Route.Turbo, Route.GitHub)
+    val all: Set<Route> = setOf(Route.Connectors, Route.CustomConnector, Route.Skills, Route.KeyBackup, Route.MyServer, Route.Antigravity, Route.Turbo, Route.GitHub, Route.Telegram)
 }
