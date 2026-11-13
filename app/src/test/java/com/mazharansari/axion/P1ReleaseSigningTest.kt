@@ -1,7 +1,6 @@
 package com.mazharansari.axion
 
 import com.mazharansari.axion.build.ProjectVerifier
-import com.mazharansari.axion.build.ReleaseSigning
 import com.mazharansari.axion.build.ReleaseSigningRequest
 import org.junit.Assert.*
 import org.junit.Test
@@ -62,14 +61,14 @@ class P1ReleaseSigningTest {
         val dir = Files.createTempDirectory("p1-9-cmd-").toFile()
         try {
             val req = request(dir)
-            val injected = ReleaseSigning.injectedArgs("/workspace/.axion-signing/demo.keystore", req.alias, req.storePassword, req.keyPassword)
-            val cmd = ReleaseSigning.gradleCommand("/root/projects/demo", useGradlew = true, injected)
+            val injected = ReleaseSigningRequest.injectedArgs("/workspace/.axion-signing/demo.keystore", req.alias, req.storePassword, req.keyPassword)
+            val cmd = ReleaseSigningRequest.gradleCommand("/root/projects/demo", useGradlew = true, injected)
             assertTrue(cmd.contains("set -o pipefail"))
             assertTrue(cmd.contains("./gradlew assembleRelease"))
             assertTrue(cmd.contains("android.injected.signing.store.file="))
             assertTrue(cmd.contains("android.injected.signing.key.alias="))
             assertTrue("the raw command carries the passwords (that is why it is never logged)", cmd.contains("store-secret-1") && cmd.contains("key-secret-2"))
-            val scrubbed = ReleaseSigning.scrubbed(cmd, req.secrets())
+            val scrubbed = ReleaseSigningRequest.scrubbed(cmd, req.secrets())
             assertFalse("scrubbed output must not contain the store password", scrubbed.contains("store-secret-1"))
             assertFalse("scrubbed output must not contain the key password", scrubbed.contains("key-secret-2"))
             assertTrue("scrubbed output must show the mask instead", scrubbed.contains("****"))
@@ -82,7 +81,7 @@ class P1ReleaseSigningTest {
     @Test fun shellQuoteKeepsTrickyPasswordsIntact() {
         // A password with a quote, a dollar and spaces must survive sh single-quoting.
         val pw = "p'a\$s sword"
-        val quoted = ReleaseSigning.shellQuote(pw)
+        val quoted = ReleaseSigningRequest.shellQuote(pw)
         val pb = ProcessBuilder("/bin/sh", "-c", "printf %s $quoted")
         pb.redirectErrorStream(true)
         val p = pb.start()
@@ -96,10 +95,10 @@ class P1ReleaseSigningTest {
             val project = File(dir, "projects/demo").apply { mkdirs() }
             val workspace = File(dir, "workspace").apply { mkdirs() }
             val src = keystoreFile(dir)
-            val staged = ReleaseSigning.stageKeystore(src, workspace, "demo")
+            val staged = ReleaseSigningRequest.stageKeystore(src, workspace, "demo")
             assertEquals("fake-keystore-bytes", staged.readText())
             assertFalse("the staged keystore must never live inside the project", staged.canonicalPath.startsWith(project.canonicalPath))
-            assertEquals("/workspace/.axion-signing/demo.keystore", ReleaseSigning.guestKeystorePath("demo"))
+            assertEquals("/workspace/.axion-signing/demo.keystore", ReleaseSigningRequest.guestKeystorePath("demo"))
         } finally {
             dir.deleteRecursively()
         }
@@ -108,9 +107,9 @@ class P1ReleaseSigningTest {
     @Test fun findReleaseApkNeedsARealArtifact() {
         val dir = Files.createTempDirectory("p1-9-apk-").toFile()
         try {
-            assertNull(ReleaseSigning.findReleaseApk(dir))
+            assertNull(ReleaseSigningRequest.findReleaseApk(dir))
             val apk = File(dir, "app/build/outputs/apk/release/app-release.apk").apply { parentFile.mkdirs(); writeText("apk") }
-            assertEquals(apk.canonicalPath, ReleaseSigning.findReleaseApk(dir)?.canonicalPath)
+            assertEquals(apk.canonicalPath, ReleaseSigningRequest.findReleaseApk(dir)?.canonicalPath)
         } finally {
             dir.deleteRecursively()
         }

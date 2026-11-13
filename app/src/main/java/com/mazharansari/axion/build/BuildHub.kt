@@ -172,7 +172,7 @@ class BuildHub(private val ctx: Context, private val linux: LinuxRuntime, privat
                     log(key, title, "Turbo: syncing the project to the server")
                     cloud.syncProjectToRemote(dir, remote)
                     log(key, title, "Turbo: building on the server")
-                    val (c, o) = cloud.runRaw("cd ${com.mazharansari.axion.linux.TurboCommands.shellQuote(remote)} && $cmd 2>&1", 45 * 60_000L) { l -> if (l.isNotBlank()) log(key, title, l.take(200)) }
+                    val (c, o) = cloud.runRaw("cd ${com.mazharansari.axion.linux.TurboCommands.shellQuote(remote)} && $cmd 2>&1", 45 * 60_000L, onLine = { l -> if (l.isNotBlank()) log(key, title, l.take(200)) })
                     log(key, title, "Turbo: syncing the results back to the phone")
                     runCatching { cloud.syncProjectBack(remote, dir) }
                     c to o
@@ -217,21 +217,21 @@ class BuildHub(private val ctx: Context, private val linux: LinuxRuntime, privat
                 File(dir, "local.properties").writeText("sdk.dir=/root/android-sdk\n")
                 // Stage the keystore outside the project (never in the repo, never in the APK);
                 // the file-picker's cache copy is deleted as soon as it is staged.
-                staged = ReleaseSigning.stageKeystore(req.keystoreFile, linux.workspaceHost, p.slug)
+                staged = ReleaseSigningRequest.stageKeystore(req.keystoreFile, linux.workspaceHost, p.slug)
                 runCatching { req.keystoreFile.delete() }
-                val injected = ReleaseSigning.injectedArgs(ReleaseSigning.guestKeystorePath(p.slug), req.alias, req.storePassword, req.keyPassword)
-                val cmd = ReleaseSigning.gradleCommand(guest(p), File(dir, "gradlew").isFile, injected)
+                val injected = ReleaseSigningRequest.injectedArgs(ReleaseSigningRequest.guestKeystorePath(p.slug), req.alias, req.storePassword, req.keyPassword)
+                val cmd = ReleaseSigningRequest.gradleCommand(guest(p), File(dir, "gradlew").isFile, injected)
                 val secrets = req.secrets()
-                val (code, out) = linux.run(cmd, 45 * 60_000L, guest(p)) { l -> if (l.isNotBlank()) log(key, title, ReleaseSigning.scrubbed(l, secrets).take(200)) }
-                val apk = ReleaseSigning.findReleaseApk(dir)
+                val (code, out) = linux.run(cmd, 45 * 60_000L, guest(p)) { l -> if (l.isNotBlank()) log(key, title, ReleaseSigningRequest.scrubbed(l, secrets).take(200)) }
+                val apk = ReleaseSigningRequest.findReleaseApk(dir)
                 if (code != 0 || apk == null || apk.length() == 0L) throw DeployException(
-                    ReleaseSigning.scrubbed(out.lines().filter { it.contains("error", true) || it.contains("FAILED") || it.startsWith("e: ") }.take(6).joinToString("\n").ifBlank { "Gradle failed (exit $code)." }, secrets))
+                    ReleaseSigningRequest.scrubbed(out.lines().filter { it.contains("error", true) || it.contains("FAILED") || it.startsWith("e: ") }.take(6).joinToString("\n").ifBlank { "Gradle failed (exit $code)." }, secrets))
                 val outDir = File(dir, ".axion/out").apply { mkdirs() }
                 val dest = File(outDir, "${p.slug}-release.apk"); apk.copyTo(dest, overwrite = true)
                 store.update(p.id) { it.copy(lastApk = dest.absolutePath) }
                 set(key, JobState.Done("Release APK ready", "${dest.name} · ${dest.length() / 1024} KB", dest.absolutePath))
             } catch (e: CancellationException) { throw e
-            } catch (e: Throwable) { set(key, JobState.Failed(title, ReleaseSigning.scrubbed(e.message ?: "Build failed", req.secrets()), (_jobs.value[key] as? JobState.Running)?.lines.orEmpty())) }
+            } catch (e: Throwable) { set(key, JobState.Failed(title, ReleaseSigningRequest.scrubbed(e.message ?: "Build failed", req.secrets()), (_jobs.value[key] as? JobState.Running)?.lines.orEmpty())) }
             finally { req.clear(); runCatching { staged?.delete() } }
         }
     }

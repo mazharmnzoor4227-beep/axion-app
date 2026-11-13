@@ -1,6 +1,8 @@
 package com.mazharansari.axion.agent
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /** What the user (or the headless default) decided about one gated action. */
 enum class ApprovalDecision { ALLOW_ONCE, ALLOW_REMEMBER, DENY }
@@ -58,7 +60,7 @@ object ApprovalGate {
         // always-ask actions (default-branch push, force-push, merge…) can never
         // be remembered. P1-2 adds the mcp_ tools the same way.
         if (tool.startsWith("github_")) {
-            val map = args.entries.associate { (k, v) -> k to (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+            val map = args.entries.associate { (k, v) -> k to (v as? JsonPrimitive)?.contentOrNull }
             val action = com.mazharansari.axion.github.GitHubGate.actionFor(
                 tool, map,
                 force = args.b("force") == true,
