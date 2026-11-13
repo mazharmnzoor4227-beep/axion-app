@@ -68,7 +68,29 @@ class UsageStore(ctx: Context) : SQLiteOpenHelper(ctx, "usage.db", null, 1) {
         return readableDatabase.rawQuery(q, a).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
     }
 
-    fun tokens(ref: String, since: Long): Long = readableDatabase.rawQuery("SELECT COALESCE(SUM(in_tok+out_tok),0) FROM usage_event WHERE ref=? AND at>=?", arrayOf(ref, since.toString())).use { c -> if (c.moveToFirst()) c.getLong(0) else 0 }
+    /** P1-10 (ME-4): fill in the real token counts for the latest call on [ref] (+[model]) once the provider's
+     * `usage`/`usageMetadata` arrives at the end of the stream. The event row already exists (recorded when the
+     * response started), so this UPDATEs it instead of adding a second row — request counts never double. */
+    fun recordUsage(ref: String, model: String, usage: TokenUsage) {
+        val db = writableDatabase
+        val id = db.rawQuery("SELECT id FROM usage_event WHERE ref=? AND model=? ORDER BY at DESC LIMIT 1", arrayOf(ref, model)).use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+            ?: db.rawQuery("SELECT id FROM usage_event WHERE ref=? ORDER BY at DESC LIMIT 1", arrayOf(ref)).use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+            ?: return
+        db.execSQL("UPDATE usage_event SET in_tok=?, out_tok=? WHERE id=?", arrayOf(usage.prompt, usage.completion, id))
+    }
+
+    fun tokens(ref: String, since: Long, model: String? = null): Long {
+        val (q, a) = if (model == null) "SELECT COALESCE(SUM(in_tok+out_tok),0) FROM usage_event WHERE ref=? AND at>=?" to arrayOf(ref, since.toString())
+            else "SELECT COALESCE(SUM(in_tok+out_tok),0) FROM usage_event WHERE ref=? AND at>=? AND model=?" to arrayOf(ref, since.toString(), model)
+        return readableDatabase.rawQuery(q, a).use { c -> if (c.moveToFirst()) c.getLong(0) else 0 }
+    }
+
+    /** True when any call on [ref] since [since] actually reported token counts (P1-10: 0 with no report is UNKNOWN, not "0 tokens"). */
+    fun hasTokens(ref: String, since: Long, model: String? = null): Boolean {
+        val (q, a) = if (model == null) "SELECT COUNT(*) FROM usage_event WHERE ref=? AND at>=? AND (in_tok>0 OR out_tok>0)" to arrayOf(ref, since.toString())
+            else "SELECT COUNT(*) FROM usage_event WHERE ref=? AND at>=? AND model=? AND (in_tok>0 OR out_tok>0)" to arrayOf(ref, since.toString(), model)
+        return readableDatabase.rawQuery(q, a).use { c -> if (c.moveToFirst()) c.getInt(0) > 0 else false }
+    }
     fun times(source: String, since: Long, ref: String? = null): List<Long> {
         val (q, a) = if (ref == null) "SELECT at FROM usage_event WHERE source=? AND at>=? ORDER BY at" to arrayOf(source, since.toString())
             else "SELECT at FROM usage_event WHERE source=? AND at>=? AND ref=? ORDER BY at" to arrayOf(source, since.toString(), ref)

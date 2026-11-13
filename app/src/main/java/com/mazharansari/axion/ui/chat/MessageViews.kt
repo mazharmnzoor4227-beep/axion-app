@@ -41,6 +41,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.mazharansari.axion.agent.CitationCheck
 import com.mazharansari.axion.data.*
 import com.mazharansari.axion.ui.components.*
 import com.mazharansari.axion.ui.theme.P
@@ -160,7 +161,19 @@ fun AssistantMessage(
         // Grok puts the document card first, then the words about it; images stay under the text.
         val (docs, images) = m.artifacts.partition { !it.mime.startsWith("image/") }
         docs.forEach { a -> Spacer(Modifier.height(12.dp)); ArtifactCard(a, { onOpenFile(a) }, { onDownload(a) }) }
-        if (m.text.isNotBlank()) { Spacer(Modifier.height(12.dp)); Markdown(m.text) }
+        // P1-6: a deep-research report's Sources list is shown as its own card in chat, not
+        // only in the saved .md file. The "## Sources" section is taken out of the markdown
+        // body (it is the last section of a research report) and rendered as this list.
+        val sources = remember(m.text) { CitationCheck.extractSources(m.text) }
+        val bodyText = remember(m.text, sources) {
+            if (sources.isEmpty()) m.text else {
+                val idx = Regex("\n## Sources\\s*\n").find(m.text)?.range?.first
+                    ?: Regex("^## Sources\\s*\n").find(m.text)?.range?.first
+                if (idx == null) m.text else m.text.substring(0, idx).trimEnd().ifBlank { m.text }
+            }
+        }
+        if (m.text.isNotBlank()) { Spacer(Modifier.height(12.dp)); Markdown(bodyText) }
+        if (sources.isNotEmpty() && !streaming) { Spacer(Modifier.height(12.dp)); SourcesList(sources) }
         if (m.usedTools.isNotEmpty()) Text((if (m.usedTools.size == 1) "Used tool: " else "Used tools: ") + m.usedTools.joinToString(", "), style = Type.small.copy(fontSize = 13.sp), color = p.text3, modifier = Modifier.padding(top = 10.dp))   // axion-p3
         images.forEach { a -> Spacer(Modifier.height(14.dp)); ImageArtifact(a, { onOpenFile(a) }, { onDownload(a) }) }
         if (m.status == MsgStatus.INTERRUPTED) Text("Response interrupted", style = Type.body, color = p.text2, modifier = Modifier.padding(top = 10.dp))
@@ -305,6 +318,30 @@ private fun SourcesPill(pages: Int, onClick: () -> Unit) {
         Box(Modifier.size(20.dp).clip(CircleShape).background(p.chip), contentAlignment = Alignment.Center) { GkIcon(Gk.globe, null, 13.dp, p.text) }
         Spacer(Modifier.width(8.dp))
         Text("$pages page${if (pages > 1) "s" else ""}", style = Type.small.copy(fontSize = 15.sp), color = p.text)
+    }
+}
+
+/**
+ * P1-6: the Sources list of a research report, shown as its own card in chat (parsed from
+ * the report text, so it is visible even when the model paraphrases the report instead of
+ * pasting it in full). Plain numbered rows — title, then the URL — no badges.
+ */
+@Composable
+private fun SourcesList(sources: List<CitationCheck.CitedSource>) {
+    val p = P
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface).padding(horizontal = 14.dp, vertical = 12.dp)) {
+        Text("Sources", style = Type.label, color = p.text)
+        Spacer(Modifier.height(8.dp))
+        sources.forEach { s ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Text("${s.n}.", style = Type.small.copy(fontSize = 14.sp), color = p.text2)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(s.title, style = Type.small.copy(fontSize = 14.sp, lineHeight = 19.sp), color = p.text)
+                    Text(s.url, style = Type.small.copy(fontSize = 12.sp), color = p.text3, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
     }
 }
 

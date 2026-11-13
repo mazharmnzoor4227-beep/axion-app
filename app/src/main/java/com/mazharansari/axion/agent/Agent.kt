@@ -2,6 +2,10 @@ package com.mazharansari.axion.agent
 
 import com.mazharansari.axion.data.*
 import com.mazharansari.axion.llm.*
+import com.mazharansari.axion.mcp.McpGetPromptTool
+import com.mazharansari.axion.mcp.McpPromptsTool
+import com.mazharansari.axion.mcp.McpReadResourceTool
+import com.mazharansari.axion.mcp.McpResourcesTool
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
@@ -63,6 +67,10 @@ class Agent(
     private val approver: Approver? = null,
     /** v0.12: Long task mode — bigger round/tool budgets and plan-verify-finish guidance. */
     private val longTask: Boolean = false,
+    /** P1-3 Turbo (server): this task's shell work runs on the user's own server when it is set
+     * up; the tools themselves decide per call (ToolContext.turbo), so an unset server just
+     * means on-device Linux, never an error the model has to work around. */
+    private val turbo: Boolean = false,
     /** v0.12 scheduler: the user's schedules, handed to the schedule_* tools through the ToolContext. */
     private val schedules: com.mazharansari.axion.data.SchedulesStore? = null,
     /** v0.12 scheduler: application context so schedule tools can arm WorkManager. */
@@ -76,14 +84,21 @@ class Agent(
             // v0.9: Axion's own browser (real WebView) + the persistent terminal and background jobs
             BrowserOpenTool(), BrowserReadTool(), BrowserClickTool(), BrowserTypeTool(), BrowserScrollTool(),
             BrowserBackTool(), BrowserForwardTool(), BrowserReloadTool(), BrowserSearchTool(), BrowserScreenshotTool(),
+            BrowserTabsTool(), BrowserDownloadsTool(),
             ShellSessionTool(), ShellResetTool(), RunBackgroundTool(), JobOutputTool(), JobKillTool(),
             // v0.10: the learning loop — persistent memory, self-written skills, past-chat search
             MemoryAddTool(), MemoryReplaceTool(), MemoryRemoveTool(), MemoryReadTool(),
             SkillCreateTool(), SkillUpdateTool(), SkillDeleteTool(), SkillViewTool(), SessionSearchTool(),
             // v0.11: deep research — the iterative search → read → gap → cross-check pipeline
             DeepResearchTool(),
+            // P1-4: subagent orchestration — 3 parallel research workers, merged and deduped
+            SubagentResearchTool(),
             // v0.12: scheduled tasks — create/list/delete; WorkManager runs them headlessly later
             ScheduleCreateTool(), ScheduleListTool(), ScheduleDeleteTool(),
+            // P1-1: in-app GitHub coding agent (clone, branch, commit, push, PRs, CI)
+            GitHubCloneTool(), GitHubStatusTool(), GitHubBranchTool(), GitHubCommitTool(), GitHubPushTool(), GitHubPrTool(), GitHubCiTool(),
+            // P1-2: MCP resources + prompts (read-only context, never instructions)
+            McpResourcesTool(), McpReadResourceTool(), McpPromptsTool(), McpGetPromptTool(),
         )
 
         /** v0.11: while Research mode is on, the model must investigate instead of answering from memory. */
@@ -104,6 +119,16 @@ class Agent(
 - You have a much larger step and tool budget than usual; use it — do not rush to finish early or skip verification to save steps.
 - If a step fails, try a different approach before giving up on it.
 - Keep the plan updated as you go (plan_update). Finish with a summary of everything that was done and anything left over."""
+
+        /** P1-3 Turbo (server): the user switched Turbo on for this task, so run_command and
+         * shell_session execute on their own server (the tools route there when it is set up)
+         * and the results sync back to the phone workspace. Prefer it for long or heavy work
+         * (builds, big conversions); the phone stays cool. If a Turbo command reports the
+         * server is not set up, say so plainly and carry on on-device — do not retry it
+         * another way and do not ask for the server address in chat (it goes in Settings). */
+        const val TURBO_GUIDANCE = """TURBO (SERVER) MODE is ON for this task (the user switched it on in the composer):
+- Shell commands run on the user's own server over SSH, not on the phone, and the results sync back to the phone workspace — read/write/list still use the workspace on the phone.
+- Prefer the server for long or heavy work (builds, big conversions, long downloads); quick commands work the same either way."""
 
         /** One internal model call (research planning / synthesis) may take this long before the next model is tried. */
         const val ASK_TIMEOUT_MS = 180_000L
@@ -157,8 +182,9 @@ class Agent(
         val researchBlock = if (researchMode && researchAvailable) "\n\n" + RESEARCH_GUIDANCE else ""
         val researchOffBlock = if (researchMode && !researchAvailable) "\n\n" + RESEARCH_OFF_NOTE else ""
         val longTaskBlock = if (longTask && intent == Intent.ACTION) "\n\n" + LONG_TASK_GUIDANCE else ""
+        val turboBlock = if (turbo) "\n\n" + TURBO_GUIDANCE else ""
         val sys = systemPrompt(profile, tools, intent) + memBlock + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
-            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock + researchOffBlock + longTaskBlock
+            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock + researchOffBlock + longTaskBlock + turboBlock
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user
@@ -179,7 +205,7 @@ class Agent(
             items += AssistantItem(text, calls)
             if (calls.isEmpty()) { answer.append(text); if (planState.active) { planState.finish(ok = !toolsOff, reason = "stopped early"); onPlan() }; return answer.toString() }
             if (text.isNotBlank()) sink.textToThoughts()
-            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask)
+            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask, turbo = turbo)
             for (call in calls) {
                 val tool = byName[call.name]
                 val args = runCatching { Json.parseToJsonElement(call.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
@@ -223,7 +249,7 @@ class Agent(
                 val step = Step(id = UUID.randomUUID().toString(), kind = label.kind, title = label.title, target = label.target, status = StepStatus.RUNNING, startedAt = System.currentTimeMillis(), detail = detail)
                 sink.step(step)
                 var lastPush = 0L
-                val live = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask) { partial ->
+                val live = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask, turbo = turbo) { partial ->
                     val now = System.currentTimeMillis()
                     if (now - lastPush > 250) { lastPush = now; sink.step(step.copy(output = com.mazharansari.axion.security.SecretScanner.scrub(partial))) }
                 }

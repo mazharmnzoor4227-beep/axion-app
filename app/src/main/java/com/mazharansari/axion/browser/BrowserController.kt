@@ -1,14 +1,19 @@
 package com.mazharansari.axion.browser
 
 import android.app.Application
+import android.app.DownloadManager
 import android.content.Context
-import android.content.MutableContextWrapper
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.net.Uri
+import android.os.Environment
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.MimeTypeMap
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -17,11 +22,15 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.mazharansari.axion.llm.Http
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -53,15 +62,21 @@ data class BrowserElement(
 data class BrowserPage(val url: String, val title: String, val text: String, val elements: List<BrowserElement>)
 
 /**
- * Axion's own browser: ONE WebView, owned here, shared by the Browser screen (the user watches and can take over)
- * and by the agent's browser_* tools. The WebView is created lazily on the main thread with a swappable context —
- * the app context while only the agent uses it, the activity while the Browser screen shows it — so it survives
- * navigation between screens and keeps its page, cookies and login state. All agent actions are serialised.
+ * Axion's own browser: ONE WebView PER TAB, owned here, shared by the Browser screen (the user watches and can take over)
+ * and by the agent's browser_* tools. Each tab's WebView is created lazily on the main thread with a swappable context —
+ * the app context while only the agent uses it, the activity while the Browser screen shows it — so tabs survive
+ * navigation between screens and keep their own page, cookies, login state and back/forward history. Switching tabs
+ * restores that tab's page. All agent actions are serialised and always act on the active tab.
+ *
+ * P1-7 (ME-9, ME-10): downloads are REAL — a page's download saves into the public Downloads/Axion folder
+ * through DownloadManager, with progress in the Browser screen and an Open action — and <input type=file>
+ * opens the system file picker (see [onFileChooserRequested] / [deliverFileChooserResult]).
  */
 class BrowserController(private val app: Application) {
     private val mutex = Mutex()
     private val wrapper = MutableContextWrapper(app)
-    @Volatile private var wv: WebView? = null
+    private val tabManager = BrowserTabManager()
+    private val views = LinkedHashMap<String, WebView>()
     private val json = Json { ignoreUnknownKeys = true }
 
     private val _url = MutableStateFlow(""); val url: StateFlow<String> = _url.asStateFlow()
@@ -70,18 +85,36 @@ class BrowserController(private val app: Application) {
     private val _progress = MutableStateFlow(0); val progress: StateFlow<Int> = _progress.asStateFlow()
     private val _canBack = MutableStateFlow(false); val canBack: StateFlow<Boolean> = _canBack.asStateFlow()
     private val _canForward = MutableStateFlow(false); val canForward: StateFlow<Boolean> = _canForward.asStateFlow()
+    private val _tabs = MutableStateFlow(tabManager.tabs); val tabs: StateFlow<List<BrowserTabState>> = _tabs.asStateFlow()
+    private val _activeTabId = MutableStateFlow(tabManager.activeId); val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
+    private val _downloads = MutableStateFlow<List<DownloadState>>(emptyList()); val downloads: StateFlow<List<DownloadState>> = _downloads.asStateFlow()
 
     @Volatile private var lastError: String? = null
     @Volatile private var lastBlocked: String? = null
-    @Volatile private var lastDownload: String? = null
+    @Volatile private var lastDownloadName: String? = null
+    @Volatile private var lastDownloadError: String? = null
     @Volatile private var loadDone: CompletableDeferred<Unit>? = null
+
+    /**
+     * File chooser plumbing (ME-10): the Browser screen sets this to launch the system file picker
+     * with the page's accepted MIME types; the picker's result comes back through [deliverFileChooserResult].
+     * While no screen is attached (agent-only use) this stays null and file inputs are declined honestly.
+     */
+    @Volatile var onFileChooserRequested: ((Array<String>) -> Unit)? = null
+    @Volatile private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private val pollScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var pollJob: Job? = null
 
     // ---- WebView creation (main thread only) ----
 
-    private fun ensureWv(): WebView = wv ?: createWv().also { wv = it }
+    private fun ensureWv(): WebView {
+        val id = tabManager.activeId
+        return views[id] ?: createWv(id).also { views[id] = it }
+    }
 
-    private fun createWv(): WebView {
+    private fun createWv(tabId: String): WebView {
         val view = WebView(wrapper)
+        view.tag = tabId
         view.setBackgroundColor(Color.WHITE)
         with(view.settings) {
             javaScriptEnabled = true
@@ -104,13 +137,21 @@ class BrowserController(private val app: Application) {
                 else { lastBlocked = u; true }   // tel:, mailto:, intent:, market: … never leave the app silently
             }
             override fun onPageStarted(v: WebView, u: String?, favicon: Bitmap?) {
+                val id = v.tag as? String ?: return
+                if (u != null) tabManager.updateTab(id, u, tabManager.tabs.firstOrNull { it.id == id }?.title.orEmpty())
+                if (id != tabManager.activeId) { syncTabFlows(); return }
                 _loading.value = true; _progress.value = 0
                 if (u != null) _url.value = u
                 // keep the waiter an operation already created (open/back/…): replacing it here would
                 // strand that waiter until its timeout, because onPageFinished completes only the latest one
                 if (loadDone?.isCompleted != false) loadDone = CompletableDeferred()
+                syncTabFlows()
             }
             override fun onPageFinished(v: WebView, u: String?) {
+                val id = v.tag as? String ?: return
+                if (u != null) tabManager.updateTab(id, u, v.title.orEmpty())
+                syncTabFlows()
+                if (id != tabManager.activeId) return
                 _loading.value = false; _progress.value = 100
                 if (u != null) _url.value = u
                 _title.value = v.title.orEmpty()
@@ -122,14 +163,50 @@ class BrowserController(private val app: Application) {
             }
         }
         view.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(v: WebView, p: Int) { _progress.value = p; if (p == 100) _title.value = v.title.orEmpty() }
-            override fun onReceivedTitle(v: WebView, t: String?) { _title.value = t.orEmpty() }
+            override fun onProgressChanged(v: WebView, p: Int) {
+                if ((v.tag as? String) != tabManager.activeId) return
+                _progress.value = p; if (p == 100) _title.value = v.title.orEmpty()
+            }
+            override fun onReceivedTitle(v: WebView, t: String?) {
+                val id = v.tag as? String ?: return
+                tabManager.updateTab(id, tabManager.tabs.firstOrNull { it.id == id }?.url.orEmpty(), t.orEmpty())
+                if (id == tabManager.activeId) _title.value = t.orEmpty()
+                syncTabFlows()
+            }
+            override fun onShowFileChooser(v: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
+                val callback = cb ?: return false
+                val launchPicker = onFileChooserRequested
+                if (launchPicker == null) { callback.onReceiveValue(null); return false }   // no screen attached: decline, do not hang the page
+                val types = params?.acceptTypes?.filter { it.isNotBlank() }?.toTypedArray()?.takeIf { it.isNotEmpty() } ?: arrayOf("*/*")
+                fileChooserCallback?.onReceiveValue(null)   // a previous chooser that never answered must not hang
+                fileChooserCallback = callback
+                return runCatching { launchPicker(types); true }.getOrElse {
+                    fileChooserCallback = null; callback.onReceiveValue(null); false
+                }
+            }
         }
-        view.setDownloadListener { u, _, _, _, _ -> lastDownload = u }   // noted, never fetched behind the user's back
+        view.setDownloadListener { u, _, contentDisposition, mimeType, _ -> startDownload(u, contentDisposition, mimeType) }
         return view
     }
 
-    /** For the Browser screen: attach the shared WebView to the visible activity. Main thread (Compose factory). */
+    private fun syncTabFlows() {
+        _tabs.value = tabManager.tabs
+        _activeTabId.value = tabManager.activeId
+    }
+
+    /** Shared flows follow the active tab (its URL/title and its own WebView's back/forward state). */
+    private fun syncActiveFlows() {
+        val tab = tabManager.active
+        _url.value = tab.url
+        _title.value = tab.title
+        _loading.value = false
+        val view = views[tab.id]
+        _canBack.value = view?.canGoBack() ?: tab.canGoBack
+        _canForward.value = view?.canGoForward() ?: tab.canGoForward
+        syncTabFlows()
+    }
+
+    /** For the Browser screen: attach the ACTIVE tab's WebView to the visible activity. Main thread (Compose factory). */
     fun displayView(activityContext: Context): View {
         wrapper.baseContext = activityContext
         val view = ensureWv()
@@ -137,14 +214,134 @@ class BrowserController(private val app: Application) {
         return view
     }
 
-    /** The Browser screen went away: keep the WebView (and its page) alive on the app context. Main thread. */
+    /** The Browser screen went away: keep the WebViews (and their pages) alive on the app context. Main thread. */
     fun releaseDisplay() {
-        wv?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        views[tabManager.activeId]?.let { (it.parent as? ViewGroup)?.removeView(it) }
         wrapper.baseContext = app
     }
 
     /** First open of the Browser screen: start somewhere real if the agent has not already opened a page. */
-    suspend fun ensureStarted() { if (_url.value.isBlank()) open("https://duckduckgo.com/") }
+    suspend fun ensureStarted() { if (tabManager.active.url.isBlank()) open(BrowserTabManager.START_URL) }
+
+    // ---- tabs (P1-7) ----
+
+    /** Opens a new blank tab and makes it active. False when the tab limit is reached. */
+    suspend fun newTab(): Boolean = action {
+        if (!tabManager.newTab()) return@action false
+        syncActiveFlows()
+        true
+    }
+
+    /** Switches to [id] and restores that tab's page. False when there is no such tab. */
+    fun switchTab(id: String): Boolean {
+        if (!tabManager.switchTo(id)) return false
+        loadDone?.complete(Unit)   // a load waiter for the old tab must not hang on the new tab
+        syncActiveFlows()
+        return true
+    }
+
+    /** Closes [id] (closing the last tab resets it to a blank tab). False when there is no such tab. */
+    suspend fun closeTab(id: String): Boolean = action {
+        val single = tabManager.tabs.size == 1
+        val view = views[id]
+        if (!tabManager.closeTab(id)) return@action false
+        if (view != null && !single) {
+            (view.parent as? ViewGroup)?.removeView(view)
+            view.destroy()
+            views.remove(id)
+        } else if (view != null) {
+            view.loadUrl("about:blank")
+        }
+        syncActiveFlows()
+        true
+    }
+
+    // ---- file chooser result (P1-7, ME-10) ----
+
+    /** The file picker's answer for the pending <input type=file>: the chosen files, or null/empty when cancelled. */
+    fun deliverFileChooserResult(uris: List<Uri>?) {
+        val cb = fileChooserCallback
+        fileChooserCallback = null
+        runCatching { cb?.onReceiveValue(uris?.toTypedArray()) }
+    }
+
+    // ---- downloads (P1-7, ME-9) ----
+
+    /** Starts a real download into Downloads/Axion. Called on the main thread by the WebView's download listener. */
+    private fun startDownload(url: String, contentDisposition: String?, mimeType: String?) {
+        val uri = runCatching { Uri.parse(url) }.getOrNull()
+        val name0 = BrowserDownloads.fileNameFor(url, contentDisposition, mimeType)
+        if (uri == null || (uri.scheme != "http" && uri.scheme != "https")) {
+            _downloads.value = _downloads.value + DownloadState(id = -System.currentTimeMillis(), url = url, fileName = name0, status = DownloadStatus.FAILED)
+            lastDownloadError = "Could not download $name0 — that link is not a file download."
+            return
+        }
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), BrowserDownloads.DIR)
+        val existing = dir.listFiles()?.map { it.name }?.toSet().orEmpty()
+        val name = BrowserDownloads.uniqueFileName(existing, name0)
+        val req = DownloadManager.Request(uri)
+            .setTitle(name)
+            .setDescription("Downloading in Axion")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "${BrowserDownloads.DIR}/$name")
+            .setAllowedOverMetered(true).setAllowedOverRoaming(true)
+        if (!mimeType.isNullOrBlank()) runCatching { req.setMimeType(mimeType) }
+        val dm = app.getSystemService(DownloadManager::class.java)
+        val dlId = runCatching { dm?.enqueue(req) }.getOrNull()
+        if (dlId == null) {
+            _downloads.value = _downloads.value + DownloadState(id = -System.currentTimeMillis(), url = url, fileName = name, status = DownloadStatus.FAILED)
+            lastDownloadError = "Could not start the download of $name."
+            return
+        }
+        lastDownloadName = name; lastDownloadError = null
+        _downloads.value = _downloads.value + DownloadState(id = dlId, url = url, fileName = name)
+        ensurePoller()
+    }
+
+    private fun ensurePoller() {
+        if (pollJob?.isActive == true) return
+        pollJob = pollScope.launch {
+            while (true) {
+                val active = _downloads.value.filter { it.status == DownloadStatus.DOWNLOADING }
+                if (active.isEmpty()) break
+                active.forEach { pollDownload(it) }
+                delay(500)
+            }
+        }
+    }
+
+    private fun pollDownload(d: DownloadState) = runCatching {
+        val dm = app.getSystemService(DownloadManager::class.java) ?: return
+        val cursor = runCatching { dm.query(DownloadManager.Query().setFilterById(d.id)) }.getOrNull() ?: return
+        cursor.use {
+            if (!it.moveToFirst()) { updateDownload(d.id) { copy(status = DownloadStatus.FAILED) }; return }
+            val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+            val received = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+            val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+            when (status) {
+                DownloadManager.STATUS_SUCCESSFUL -> updateDownload(d.id) { copy(bytesReceived = received, totalBytes = total, status = DownloadStatus.COMPLETE) }
+                DownloadManager.STATUS_FAILED -> updateDownload(d.id) { copy(bytesReceived = received, totalBytes = total, status = DownloadStatus.FAILED) }
+                else -> updateDownload(d.id) { copy(bytesReceived = received, totalBytes = total) }
+            }
+        }
+    }
+
+    private fun updateDownload(id: Long, f: DownloadState.() -> DownloadState) {
+        _downloads.value = _downloads.value.map { if (it.id == id) it.f() else it }
+    }
+
+    /** Opens a finished download with the app that handles its file type. False when it is not finished or cannot be opened. */
+    fun openDownload(downloadId: Long): Boolean {
+        val state = _downloads.value.firstOrNull { it.id == downloadId } ?: return false
+        if (state.status != DownloadStatus.COMPLETE) return false
+        val dm = app.getSystemService(DownloadManager::class.java) ?: return false
+        val uri = runCatching { dm.getUriForDownloadedFile(downloadId) }.getOrNull() ?: return false
+        val ext = state.fileName.substringAfterLast('.', "").lowercase()
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { app.startActivity(intent); true }.getOrDefault(false)
+    }
 
     // ---- action plumbing ----
 
@@ -172,7 +369,8 @@ class BrowserController(private val app: Application) {
         if (_loading.value) append("  [still loading — browser_read again in a moment]")
         lastError?.let { append("  [load note: $it]") }
         lastBlocked?.let { append("  [the page tried to open $it — outside links like that are not followed]") }
-        lastDownload?.let { append("  [the page offered a file download: $it — the browser does not save downloads; use browse_url or run_command with curl for files]") }
+        lastDownloadName?.let { append("  [download started: $it — saved in Downloads/Axion]") }
+        lastDownloadError?.let { append("  [$it]") }
     }
 
     private fun normalize(raw: String): String? {
@@ -183,12 +381,13 @@ class BrowserController(private val app: Application) {
         return "https://$u"
     }
 
-    // ---- the operations (tools + screen share these) ----
+    // ---- the operations (tools + screen share these; always the ACTIVE tab) ----
 
     suspend fun open(rawUrl: String): String = action {
         val u = normalize(rawUrl) ?: return@action "That does not look like a web address: \"$rawUrl\". Use browser_search for a search instead."
-        lastError = null; lastBlocked = null; lastDownload = null
+        lastError = null; lastBlocked = null; lastDownloadName = null; lastDownloadError = null
         loadDone = CompletableDeferred(); _loading.value = true
+        tabManager.navigate(u); syncTabFlows()
         ensureWv().loadUrl(u)
         awaitLoad(30_000)
         statusLine("Opened")
@@ -202,9 +401,11 @@ class BrowserController(private val app: Application) {
 
     suspend fun search(query: String): String = action {
         if (query.isBlank()) return@action "Empty search."
-        lastError = null; lastBlocked = null; lastDownload = null
+        lastError = null; lastBlocked = null; lastDownloadName = null; lastDownloadError = null
         loadDone = CompletableDeferred(); _loading.value = true
-        ensureWv().loadUrl("https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8"))
+        val searchUrl = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
+        tabManager.navigate(searchUrl); syncTabFlows()
+        ensureWv().loadUrl(searchUrl)
         awaitLoad(30_000)
         statusLine("Search results")
     }
@@ -267,7 +468,9 @@ class BrowserController(private val app: Application) {
         val view = ensureWv()
         if (!view.canGoBack()) return@action "No page to go back to."
         loadDone = CompletableDeferred(); _loading.value = true
-        view.goBack(); awaitLoad(15_000)
+        view.goBack()
+        tabManager.goBack()
+        awaitLoad(15_000)
         statusLine("Back")
     }
 
@@ -275,7 +478,9 @@ class BrowserController(private val app: Application) {
         val view = ensureWv()
         if (!view.canGoForward()) return@action "No page to go forward to."
         loadDone = CompletableDeferred(); _loading.value = true
-        view.goForward(); awaitLoad(15_000)
+        view.goForward()
+        tabManager.goForward()
+        awaitLoad(15_000)
         statusLine("Forward")
     }
 
@@ -286,7 +491,7 @@ class BrowserController(private val app: Application) {
     }
 
     fun stopLoading() {
-        wv?.stopLoading(); _loading.value = false; loadDone?.complete(Unit)
+        views[tabManager.activeId]?.stopLoading(); _loading.value = false; loadDone?.complete(Unit)
     }
 
     /** A picture of what the browser shows right now (the visible viewport), saved as a PNG. */

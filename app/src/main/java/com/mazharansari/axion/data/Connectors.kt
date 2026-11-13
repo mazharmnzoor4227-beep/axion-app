@@ -31,6 +31,13 @@ data class Connector(
     val baseUrl: String? = null,
     /** v0.5 "Local model": which downloaded GGUF (LocalModel id). */
     val localModel: String? = null,
+    /**
+     * P1-10 (ME-3): shared-quota group, set by the user on the Quota screen. Gemini keys from the same Google
+     * project share ONE quota, so keys with the same non-blank group are counted once in the totals. Blank = this
+     * key is its own group. Axion cannot learn the project from the key itself (Google exposes no such lookup for
+     * an API key), so the grouping is explicit and user-set, never guessed.
+     */
+    val quotaGroup: String = "",
 ) {
     val provider: Provider get() = Providers.byId(providerId)!!
     val own: Boolean get() = providerId == "local" || providerId == "myserver"
@@ -124,6 +131,8 @@ class ConnectorRepo(private val ctx: Context) {
         return fresh.size
     }
     fun setEnabled(id: String, on: Boolean) = save(_list.value.map { if (it.id == id) it.copy(enabled = on) else it })
+    /** P1-10 (ME-3): name the shared-quota group this key belongs to (blank = its own quota). */
+    fun setQuotaGroup(id: String, group: String) = save(_list.value.map { if (it.id == id) it.copy(quotaGroup = group.trim().take(40)) else it })
     fun pinModel(id: String, model: String?) = save(_list.value.map { if (it.id == id) it.copy(pinnedModel = model) else it })
     fun move(id: String, up: Boolean) {
         val l = _list.value.toMutableList(); val i = l.indexOfFirst { it.id == id }; val j = if (up) i - 1 else i + 1

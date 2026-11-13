@@ -16,6 +16,9 @@ import kotlinx.serialization.json.JsonObject
 private fun session(): ShellSession =
     LinuxHub.graph?.shell ?: throw IllegalStateException("The shell session is not available in this context.")
 
+/** P1-3: the remote shell, used by shell_session when Turbo is on for the task and set up. */
+private fun turboSession(): com.mazharansari.axion.linux.TurboShellSession? = LinuxHub.cloud?.turboShell
+
 private fun jobs(): BackgroundJobs =
     LinuxHub.graph?.jobs ?: throw IllegalStateException("Background jobs are not available in this context.")
 
@@ -30,6 +33,12 @@ class ShellSessionTool : Tool {
         val cmd = args.s("command").orEmpty()
         if (cmd.isBlank()) return ToolOutput("Empty command", isError = true)
         val timeout = (args.i("timeout_sec") ?: 120).coerceIn(1, 600).toLong()
+        // P1-3 Turbo (server): same persistent-shell behaviour, on the user's own server.
+        val cloud = com.mazharansari.axion.linux.LinuxHub.cloud
+        if (ctx.turbo && cloud?.useTurbo(true) == true) {
+            val r = try { turboSession()!!.exec(cmd, timeout * 1000) } catch (e: Throwable) { return ToolOutput("Shell error: ${e.message}", isError = true) }
+            return format(r)
+        }
         val r = try { session().exec(cmd, timeout * 1000) } catch (e: Throwable) { return ToolOutput("Shell error: ${e.message}", isError = true) }
         return format(r)
     }

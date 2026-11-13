@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import com.mazharansari.axion.data.Connector
 import com.mazharansari.axion.llm.Provider
 import com.mazharansari.axion.llm.Providers
+import com.mazharansari.axion.skills.SkillHub
 import com.mazharansari.axion.skills.SkillRepo
 import com.mazharansari.axion.ui.ChatViewModel
 import com.mazharansari.axion.ui.Route
@@ -52,6 +53,9 @@ fun ConnectorsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) 
     var q by remember { mutableStateOf("") }
     var manage by remember { mutableStateOf<Connector?>(null) }
     var connectFor by remember { mutableStateOf<Provider?>(null) }
+    // P1-2: catalogue preset being enabled (capabilities shown first) + server whose tool allow-list is being edited.
+    var cataloguePreset by remember { mutableStateOf<com.mazharansari.axion.mcp.McpPreset?>(null) }
+    var allowFor by remember { mutableStateOf<com.mazharansari.axion.mcp.McpServer?>(null) }
     fun connect() {
         if (key.isBlank() || busy) return
         busy = true; result = null
@@ -126,14 +130,46 @@ fun ConnectorsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) 
             item { SettingsGroup { providers.filter { !it.free }.forEach { pr -> ProviderRow(pr, connectors.count { it.providerId == pr.id }, { open(ctx, pr.keyPage) }) { connectFor = pr } } } }
             item {
                 SectionLabel("Tools · MCP servers")
+                // P1-2: a server that fails 3 checks in a row is auto-disabled, with a notice.
+                val mcpNotice by vm.g.mcp.notice.collectAsState()
+                mcpNotice?.let { n ->
+                    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card).padding(14.dp)) {
+                        Text(n, style = Type.small, color = p.text)
+                        Spacer(Modifier.height(8.dp))
+                        Pill("Dismiss") { vm.g.mcp.dismissNotice() }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
                 SettingsGroup {
                     mcp.forEach { s ->
-                        SettingsRow(Gk.connectors, s.name, s.url, chevron = false, trailing = {
-                            IconTap(Gk.trash, "Remove") { vm.g.mcp.remove(s.id) }
-                        })
+                        SettingsRow(Gk.connectors, s.name,
+                            (if (s.transport == "stdio") "Local command: ${s.command}" else s.url) +
+                                (if (s.disabledReason.isNotBlank()) " · ${s.disabledReason}" else ""),
+                            chevron = false,
+                            trailing = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Switch(s.enabled, { vm.g.mcp.setEnabled(s.id, it) },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = p.onAccent, checkedTrackColor = p.accent, uncheckedThumbColor = p.text2, uncheckedTrackColor = p.surface2, uncheckedBorderColor = p.border))
+                                    Spacer(Modifier.width(8.dp))
+                                    IconTap(Gk.trash, "Remove") { vm.g.mcp.remove(s.id) }
+                                }
+                            },
+                            onClick = { allowFor = s })
                         Divider()
                     }
                     SettingsRow(Gk.plus, "Add custom connector", "Any remote MCP server URL") { nav(Route.CustomConnector) }
+                }
+                SectionLabel("Add from catalogue")
+                SettingsGroup {
+                    com.mazharansari.axion.mcp.McpCatalogue.presets.forEach { preset ->
+                        val added = mcp.any { it.preset == preset.id }
+                        SettingsRow(Gk.connectors, preset.name,
+                            if (added) "Added" else if (preset.transport == "stdio") "Runs on this phone · tap to see what it can do" else "Remote server · tap to see what it can do",
+                            chevron = false,
+                            trailing = { if (!added) Pill("Add") { cataloguePreset = preset } }) {
+                            if (!added) cataloguePreset = preset
+                        }
+                    }
                 }
                 SectionLabel("Antigravity · usage")
                 SettingsGroup {
@@ -175,6 +211,108 @@ fun ConnectorsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) 
                 Spacer(Modifier.height(8.dp))
             }
         }
+    }
+    cataloguePreset?.let { preset ->
+        CataloguePresetSheet(vm, preset, nav, { cataloguePreset = null })
+    }
+    allowFor?.let { s ->
+        AllowListSheet(vm, s) { allowFor = null }
+    }
+}
+
+/** P1-2: a catalogue preset shows what it can do BEFORE it is enabled. */
+@Composable
+private fun CataloguePresetSheet(vm: ChatViewModel, preset: com.mazharansari.axion.mcp.McpPreset, nav: (Route) -> Unit, onDismiss: () -> Unit) {
+    val p = P
+    val scope = rememberCoroutineScope()
+    var url by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = p.text2, unfocusedBorderColor = p.border, focusedTextColor = p.text, unfocusedTextColor = p.text, cursorColor = p.text, focusedLabelColor = p.text2, unfocusedLabelColor = p.text3)
+    val githubToken = vm.g.github.token()
+    com.mazharansari.axion.ui.chat.AxionSheet(onDismiss) {
+        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(preset.name, style = Type.title, color = p.text)
+            Text(preset.note, style = Type.small, color = p.text2)
+            Text("What it can do", style = Type.label, color = p.text)
+            preset.capabilities.forEach { Text("•  $it", style = Type.small, color = p.text) }
+            if (preset.transport == "remote") {
+                OutlinedTextField(url, { url = it.trim() }, label = { Text("Server URL") }, placeholder = { Text(preset.urlHint, color = p.text3) }, singleLine = true, colors = colors, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(token, { token = it.trim() }, label = { Text("Token (optional)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = colors, modifier = Modifier.fillMaxWidth())
+            }
+            if (preset.needsGitHubToken) {
+                if (githubToken == null) {
+                    Text("Connect GitHub first in Settings → GitHub — this preset uses that token.", style = Type.small, color = p.danger)
+                    Pill("Open GitHub settings", filled = true) { onDismiss(); nav(Route.GitHub) }
+                } else {
+                    Text("Uses your connected GitHub token.", style = Type.small, color = p.text2)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Pill(if (busy) "Enabling…" else "Enable", filled = true) {
+                    if (busy) return@Pill
+                    if (preset.transport == "remote" && url.isBlank()) { msg = "Paste the server URL first."; return@Pill }
+                    if (preset.needsGitHubToken && githubToken == null) { msg = "Connect GitHub first in Settings → GitHub."; return@Pill }
+                    busy = true; msg = null
+                    scope.launch {
+                        val env = if (preset.needsGitHubToken) mapOf("GITHUB_PERSONAL_ACCESS_TOKEN" to (githubToken ?: "")) else emptyMap()
+                        vm.g.mcp.addPreset(preset, url, token, env)
+                            .onSuccess { n -> msg = "Connected · $n tools"; busy = false; onDismiss() }
+                            .onFailure { msg = it.message ?: "Couldn't connect"; busy = false }
+                    }
+                }
+                if (busy) { Spacer(Modifier.width(12.dp)); CircularProgressIndicator(Modifier.size(18.dp), color = p.text, strokeWidth = 2.dp) }
+            }
+            msg?.let { Text(it, style = Type.small, color = if (it.startsWith("Connected")) p.text else p.danger) }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+/** P1-2: per-server tool allow-list — untick a tool to hide it from the agent. */
+@Composable
+private fun AllowListSheet(vm: ChatViewModel, s: com.mazharansari.axion.mcp.McpServer, onDismiss: () -> Unit) {
+    val p = P
+    var tools by remember { mutableStateOf<List<String>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var err by remember { mutableStateOf<String?>(null) }
+    val picked = remember { mutableStateMapOf<String, Boolean>() }
+    LaunchedEffect(s.id) {
+        loading = true; err = null
+        runCatching { vm.g.mcp.toolsFor(s.id) }
+            .onSuccess { list -> tools = list; list.forEach { picked[it] = s.allowedTools.isEmpty() || it in s.allowedTools } }
+            .onFailure { err = it.message }
+        loading = false
+    }
+    com.mazharansari.axion.ui.chat.AxionSheet(onDismiss) {
+        Text("${s.name} · tools", style = Type.title, color = p.text, modifier = Modifier.padding(horizontal = 22.dp))
+        Text("Untick a tool to hide it from the agent. Everything ticked means every tool is allowed.",
+            style = Type.small, color = p.text2, modifier = Modifier.padding(horizontal = 22.dp, vertical = 6.dp))
+        if (loading) {
+            Row(Modifier.padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(18.dp), color = p.text, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp)); Text("Listing tools…", style = Type.small, color = p.text2)
+            }
+        }
+        err?.let { Text(it, style = Type.small, color = p.danger, modifier = Modifier.padding(horizontal = 22.dp)) }
+        LazyColumn(Modifier.heightIn(max = 280.dp)) {
+            items(tools, key = { it }) { t ->
+                Row(Modifier.fillMaxWidth().clickable {
+                    picked[t] = !(picked[t] ?: false)
+                    val checked = tools.filter { picked[it] == true }
+                    vm.g.mcp.setAllowedTools(s.id, if (checked.size == tools.size) emptyList() else checked)
+                }.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(picked[t] == true, {
+                        picked[t] = it
+                        val checked = tools.filter { picked[it] == true }
+                        vm.g.mcp.setAllowedTools(s.id, if (checked.size == tools.size) emptyList() else checked)
+                    }, colors = CheckboxDefaults.colors(checkedColor = p.accent, checkmarkColor = p.onAccent, uncheckedColor = p.text3))
+                    Text(t, style = Type.body, color = p.text, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -294,6 +432,7 @@ fun SkillsScreen(vm: ChatViewModel, back: () -> Unit) {
     val skills by vm.g.skills.skills.collectAsState()
     var url by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var hubBusy by remember { mutableStateOf<String?>(null) }
     var msg by remember { mutableStateOf<String?>(null) }
     var found by remember { mutableStateOf<List<SkillRepo.Found>>(emptyList()) }
     var viewing by remember { mutableStateOf<com.mazharansari.axion.skills.Skill?>(null) }
@@ -350,6 +489,42 @@ fun SkillsScreen(vm: ChatViewModel, back: () -> Unit) {
                 Row(Modifier.fillMaxWidth().clickable { picked[f.repoPath] = !(picked[f.repoPath] ?: false) }.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(picked[f.repoPath] == true, { picked[f.repoPath] = it }, colors = CheckboxDefaults.colors(checkedColor = p.accent, checkmarkColor = p.onAccent, uncheckedColor = p.text3))
                     Column(Modifier.weight(1f)) { Text(f.name, style = Type.label, color = p.text); Text(f.description, style = Type.small, color = p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+            // P1-5 Skill hub: the curated list — built-ins and the 5 Mika skills are already
+            // installed (shown with their licence); community entries install with one tap.
+            // Only MIT / Apache-2.0 repos are listed; anything else is refused at install time.
+            item { SectionLabel("Skill hub") }
+            item {
+                Text("Built-in skills and the 5 Mika skills are already in the app. Community skills come from public GitHub repos (MIT / Apache-2.0 only) — tap Install to add one.",
+                    style = Type.small.copy(fontSize = 14.sp, lineHeight = 20.sp), color = p.text2, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+            }
+            items(SkillHub.entries(vm.g.skills), key = { "hub_${it.kind}_${it.name}" }) { e ->
+                val installed = if (e.kind == SkillHub.HubKind.COMMUNITY) SkillHub.isInstalled(vm.g.skills, e) else true
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface)
+                    .padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    GkIcon(Gk.skills, null, 22.dp, p.text); Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(e.name + "  · " + when (e.kind) { SkillHub.HubKind.MIKA -> "Mika"; SkillHub.HubKind.BUILT_IN -> "built-in"; SkillHub.HubKind.COMMUNITY -> "community" },
+                            style = Type.label, color = p.text)
+                        Text(e.description, style = Type.small, color = p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("Licence: ${e.licence}" + if (e.repoUrl.isNotBlank()) "  ·  ${e.repoUrl.removePrefix("https://")}" else "",
+                            style = Type.small, color = p.text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    if (e.kind == SkillHub.HubKind.COMMUNITY) {
+                        if (installed) Text("Installed", style = Type.small, color = p.text2)
+                        else Pill(if (hubBusy == e.repoUrl) "Installing…" else "Install") {
+                            if (hubBusy != null) return@Pill
+                            hubBusy = e.repoUrl; msg = null
+                            scope.launch {
+                                runCatching { SkillHub.install(vm.g.skills, e) }
+                                    .onSuccess { added -> msg = "Installed ${added.size} skill${if (added.size == 1) "" else "s"} from ${e.name}" }
+                                    .onFailure { msg = it.message }
+                                hubBusy = null
+                            }
+                        }
+                    } else Text("Installed", style = Type.small, color = p.text2)
                 }
             }
             item { SectionLabel("Installed") }

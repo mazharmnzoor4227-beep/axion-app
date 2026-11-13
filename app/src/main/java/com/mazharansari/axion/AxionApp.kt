@@ -46,7 +46,9 @@ class Graph(val app: Application) {
     val taskRuns by lazy { com.mazharansari.axion.data.TaskRunStore(app) }
     /** v0.12: scheduled tasks (Hermes-style) — created by the agent, run headlessly by WorkManager. */
     val schedules by lazy { com.mazharansari.axion.data.SchedulesStore(app) }
-    val mcp by lazy { McpRepo(app.filesDir) }
+    val mcp by lazy { McpRepo(app.filesDir, linux = { linux }) }
+    /** P1-1 (§6.1): the connected GitHub account (KeyVault-encrypted token) + its audit log. */
+    val github by lazy { com.mazharansari.axion.github.GitHubStore(File(app.filesDir, "github")) }
     val speaker by lazy { Speaker(app) }
     val imageGen by lazy {
         com.mazharansari.axion.agent.ImageGen({
@@ -79,7 +81,9 @@ class Graph(val app: Application) {
     val agyClient by lazy { com.mazharansari.axion.antigravity.AgyClient(linux, agy, quota, agyProbe) }
 
     // v0.5 — Build projects (preview, deploy, APK) and on-device models.
-    val build by lazy { com.mazharansari.axion.build.BuildHub(app, linux, devtools) }
+    /** P1-3 Turbo (server): the opt-in cloud sandbox (off by default; see linux/CloudSandbox). */
+    val cloud by lazy { com.mazharansari.axion.linux.CloudSandbox(app) }
+    val build by lazy { com.mazharansari.axion.build.BuildHub(app, linux, devtools, cloud) }
     val updater by lazy { com.mazharansari.axion.update.AppUpdater(app) }
     /** v0.8.0 (Phase C): every chat/Build run in flight; WorkService keeps the process alive while this is non-empty. */
     val runs by lazy {
@@ -103,6 +107,7 @@ class Graph(val app: Application) {
         connectors.list.value.forEach { c -> if (c.providerId != "local") c.key().takeIf { it.length >= 12 }?.let(out::add) }
         runCatching { com.mazharansari.axion.build.DeployProvider.entries.forEach { p -> build.tokens.token(p)?.takeIf { it.length >= 12 }?.let(out::add) } }
         runCatching { mcp.servers.value.forEach { s -> com.mazharansari.axion.data.KeyVault.decrypt(s.tokenBlob)?.takeIf { it.length >= 12 }?.let(out::add) } }
+        runCatching { github.token()?.takeIf { it.length >= 12 }?.let(out::add) }
         runCatching { com.mazharansari.axion.voice.VoicePrefs.savedSecrets(app).forEach { if (it.length >= 12) out += it } }
         return out
     }

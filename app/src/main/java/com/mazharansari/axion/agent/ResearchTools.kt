@@ -218,17 +218,25 @@ class DeepResearchTool : Tool {
             sources.forEach { appendLine("${it.n}. ${it.title} — ${it.url}") }
         }
 
-        // ── 6. SAVE + RETURN ─────────────────────────────────────────────────────────────────
+        // ── 6. VERIFY CITATIONS IN CODE (P1-6) + SAVE + RETURN ─────────────────────────────
+        // The synthesis prompt asks for citations, but only this pass enforces them: every key
+        // claim must carry an [n], every [n] must exist in Sources, and a key number needs
+        // 2+ independent sources — otherwise the report itself says so ("single source" /
+        // "citation needed") before it is shown or saved.
+        val checked = CitationCheck.verify(report)
+        val finalReport = CitationCheck.annotate(report)
+        val checkNote = if (checked.violations.isEmpty()) "Citation check passed."
+        else "Citation check found ${checked.violations.size} issue${if (checked.violations.size == 1) "" else "s"} (marked in the report)."
         val slug = topic.lowercase(Locale.US).replace(Regex("[^a-z0-9]+"), "-").trim('-').take(40).ifBlank { "topic" }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
         val file = runCatching {
             val dir = File(ctx.workspace.outputs, "research").apply { mkdirs() }
-            File(dir, "$slug-$stamp.md").apply { writeText(report) }
+            File(dir, "$slug-$stamp.md").apply { writeText(finalReport) }
         }.getOrNull()
         val savedNote = file?.let { "Saved as ${ctx.workspace.rel(it)}.\n\n" } ?: ""
         return ToolOutput(
-            forModel = "Deep research complete ($counts). Present the report below to the user IN FULL — keep the [n] citations and the Sources list exactly as they are.\n\n" + savedNote + report,
-            display = report.take(2_500),
+            forModel = "Deep research complete ($counts). $checkNote Present the report below to the user IN FULL — keep the [n] citations, the Citation check note and the Sources list exactly as they are.\n\n" + savedNote + finalReport,
+            display = finalReport.take(2_500),
             artifact = file?.let { Artifact(it.name, "text/markdown", it.absolutePath, it.length()) },
             doneTitle = "Researched ${sources.size} sources",
         )

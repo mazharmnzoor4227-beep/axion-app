@@ -23,12 +23,26 @@ object QuotaHooks {
         val s = sink ?: return
         runCatching { s(tag, providerId, model, code, headers.names().associateWith { headers[it].orEmpty() }.filterKeys { RateHeaders.interesting(it) }, errorBody) }
     }
+
+    /** P1-10 (ME-4): the real token counts, reported by the client when the provider's `usage`/`usageMetadata`
+     * arrives at the end of the stream. Recorded against the event row the response already created — never a second event. */
+    @Volatile var usageSink: ((tag: String?, providerId: String, model: String, usage: TokenUsage) -> Unit)? = null
+    fun reportUsage(tag: String?, providerId: String, model: String, usage: TokenUsage) {
+        runCatching { usageSink?.invoke(tag, providerId, model, usage) }
+    }
 }
+
+/** P1-10 (ME-3): the quota bucket a connector draws from. Gemini keys with the same non-blank group share one
+ * Google-project quota and are counted once; every other key is its own bucket. */
+internal fun quotaGroupKey(c: Connector): String =
+    if (c.providerId == "gemini" && c.quotaGroup.isNotBlank()) "gemini:${c.quotaGroup.trim()}" else c.id
 
 data class KeyRow(
     val connectorId: String, val providerId: String, val providerName: String, val keyHint: String,
     val model: String, val models: Int, val day: QuotaMath.Day, val perModel: List<Pair<String, QuotaMath.Day>>,
     val minute: Reading?, val note: String, val retired: Boolean = false, val free: Boolean = false,
+    /** P1-10: the shared-quota group this key belongs to (blank = its own quota). */
+    val quotaGroup: String = "",
 )
 
 data class AgyRow(val account: AgyAccount, val buckets: List<AgyUsageParser.Bucket>, val probedAt: Long?, val runsToday: Int, val tokensToday: Long, val raw: List<String>)
@@ -53,6 +67,7 @@ class QuotaRepo(private val ctx: Context, private val connectors: ConnectorRepo,
 
     init {
         QuotaHooks.sink = { tag, pid, model, code, headers, body -> onResponse(tag ?: pid, pid, model, code, headers, body) }
+        QuotaHooks.usageSink = { tag, pid, model, usage -> recordUsage(tag ?: pid, model, usage) }
         runCatching { store.prune(System.currentTimeMillis()) }
     }
 
@@ -70,6 +85,9 @@ class QuotaRepo(private val ctx: Context, private val connectors: ConnectorRepo,
     }
 
     fun recordAgyRun(email: String, ok: Boolean, inTok: Long, outTok: Long) { store.event(System.currentTimeMillis(), "agy", email, "antigravity", "", ok, if (ok) 200 else 0, inTok, outTok); bump() }
+
+    /** P1-10 (ME-4): the provider's own usage counts for the call that just finished — fills in the event row, never a second event. */
+    fun recordUsage(ref: String, model: String, usage: TokenUsage) { store.recordUsage(ref, model, usage); bump() }
 
     /** Store one `agy -p /usage` answer: parsed buckets as fraction snapshots + the raw text (last 3 per account). */
     fun recordAgyProbe(email: String, raw: String, now: Long = System.currentTimeMillis()): AgyUsageParser.Result {
@@ -117,8 +135,10 @@ class QuotaRepo(private val ctx: Context, private val connectors: ConnectorRepo,
         val ov = store.overrideOf(c.id, model)
         val start = ProviderDay.start(c.providerId, now)
         val liveToday = live?.takeIf { it.second >= start || (it.first.resetAt ?: 0) > now }
+        val tokModel = if (perModelProvider(c.providerId)) model else null
         return QuotaMath.day(liveToday?.first, liveToday?.second ?: 0, store.lastCallAt(c.id), ov?.first, ov?.second == "429", publishedDay(c.providerId, model),
-            store.count(c.id, start, m.ifEmpty { null }), connectors.coolingUntil(c, model), now, ProviderDay.nextReset(c.providerId, now))
+            store.count(c.id, start, m.ifEmpty { null }), connectors.coolingUntil(c, model), now, ProviderDay.nextReset(c.providerId, now),
+            countedTokens = store.tokens(c.id, start, tokModel), hasTokens = store.hasTokens(c.id, start, tokModel))
     }
 
     /** For routing: how many requests this key still has today (null = unknown). */
@@ -134,7 +154,9 @@ class QuotaRepo(private val ctx: Context, private val connectors: ConnectorRepo,
             val day = if (known.size > 1) {
                 val l = known.sumOf { it.second.limit.value!! }; val u = known.sumOf { it.second.used.value ?: 0.0 }; val left = known.sumOf { it.second.left.value ?: 0.0 }
                 val tag = known.map { it.second.limit.tag }.minByOrNull { it.ordinal } ?: Tag.PUBLISHED
-                QuotaMath.Day(QuotaMath.Num(l, tag), QuotaMath.Num(u, known.first().second.used.tag), QuotaMath.Num(left, if (known.all { it.second.left.tag == Tag.LIVE }) Tag.LIVE else Tag.ESTIMATE), known.mapNotNull { it.second.resetAt }.minOrNull())
+                val tok = known.mapNotNull { it.second.tokens.value }
+                QuotaMath.Day(QuotaMath.Num(l, tag), QuotaMath.Num(u, known.first().second.used.tag), QuotaMath.Num(left, if (known.all { it.second.left.tag == Tag.LIVE }) Tag.LIVE else Tag.ESTIMATE), known.mapNotNull { it.second.resetAt }.minOrNull(),
+                    if (tok.isEmpty()) QuotaMath.Num(null, Tag.UNKNOWN) else QuotaMath.Num(tok.sum(), Tag.COUNTED))
             } else per.firstOrNull { it.first == primary }?.second ?: dayFor(c, primary, now)
             val minute = store.latest(c.id, "minute", null)?.takeIf { now - it.second < 10 * 60_000 }?.first
             val note = when (c.providerId) {
@@ -145,9 +167,11 @@ class QuotaRepo(private val ctx: Context, private val connectors: ConnectorRepo,
                 "mistral" -> "Per-second limit only · no daily cap shown by Mistral"
                 else -> p?.note ?: ""
             }
-            KeyRow(c.id, c.providerId, p?.name ?: c.providerId, c.keyHint, primary, maxOf(per.size, 1), day, per, minute, note, free = p?.free == true)
+            KeyRow(c.id, c.providerId, p?.name ?: c.providerId, c.keyHint, primary, maxOf(per.size, 1), day, per, minute, note, free = p?.free == true, quotaGroup = c.quotaGroup)
         }
-        val totals = QuotaMath.totals(rows.filter { !it.retired }.map { it.connectorId to it.day })
+        // P1-10 (ME-3): shared Google-project quotas are grouped, not summed — see [quotaGroupKey].
+        val byId = connectors.list.value.associateBy { it.id }
+        val totals = QuotaMath.totals(rows.filter { !it.retired }.map { it.connectorId to it.day }, shareGroup = { id -> byId[id]?.let { quotaGroupKey(it) } ?: id })
         val dayStart = rows.minOfOrNull { ProviderDay.start(it.providerId, now) } ?: (now - 86_400_000L)
         val rate = QuotaMath.ratePerHour(store.times("key", now - 86_400_000L), now, dayStart)
         val reset = rows.mapNotNull { it.day.resetAt }.minOrNull()

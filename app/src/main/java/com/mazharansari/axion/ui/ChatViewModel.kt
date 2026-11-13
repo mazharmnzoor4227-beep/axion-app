@@ -484,6 +484,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val researchOn = sec == Section.ASK && s.deepResearch
         // v0.12: Long task mode (composer toggle) — bigger budgets + a persisted run record.
         val longTaskOn = sec == Section.ASK && s.longTask
+        // P1-3 Turbo (server): this task's shell work runs on the user's own server when set up.
+        val turboOn = sec == Section.ASK && s.turbo
         val quick = sec == Section.ASK && !researchOn && com.mazharansari.axion.agent.IntentGate.isSmallTalk(u.text, intent)
         val userItem = UserItem(u.text.ifBlank { "Look at the attached file(s)." } + attachmentNote(u.attachments), media(u.attachments))
         val aid = UUID.randomUUID().toString()
@@ -554,7 +556,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (sec == Section.BUILD && pid != null) withContext(Dispatchers.Default) { runBuildTurn(pid, u, sink) }
                 else withContext(Dispatchers.Default) {
                     Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn,
-                        approvals = g.approvals, approver = approver, longTask = longTaskOn, schedules = g.schedules, appCtx = getApplication()).run(
+                        approvals = g.approvals, approver = approver, longTask = longTaskOn, turbo = turboOn, schedules = g.schedules, appCtx = getApplication()).run(
                         history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }) }, sink = sink,
                         profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
                         intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools

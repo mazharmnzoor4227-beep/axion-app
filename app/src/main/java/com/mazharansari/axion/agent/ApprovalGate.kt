@@ -53,9 +53,38 @@ object ApprovalGate {
 
     /** Returns a gate request for this tool call, or null when it may run freely. */
     fun requestFor(tool: String, args: JsonObject): GateRequest? {
+        // P1-1 (§6.2): the GitHub tools gate here, not in the tool itself — so the
+        // agent's normal approval dialog (and remembered rules) apply, and the
+        // always-ask actions (default-branch push, force-push, merge…) can never
+        // be remembered. P1-2 adds the mcp_ tools the same way.
+        if (tool.startsWith("github_")) {
+            val map = args.entries.associate { (k, v) -> k to (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+            val action = com.mazharansari.axion.github.GitHubGate.actionFor(
+                tool, map,
+                force = args.b("force") == true,
+                branch = args.s("branch"),
+            ) ?: return null
+            if (action in com.mazharansari.axion.github.GitHubGate.READ_ONLY) return null
+            val hard = action in com.mazharansari.axion.github.GitHubGate.ALWAYS_ASK
+            val label = args.s("repo") ?: args.s("repo_dir") ?: tool
+            return GateRequest(
+                tool = tool,
+                summary = "GitHub ${action.name.lowercase().replace('_', ' ')}: $label",
+                pattern = if (hard) "" else "github ${action.name.lowercase()}",
+                hard = hard,
+                hardReason = if (hard) com.mazharansari.axion.github.GitHubGate.hardReason(action) else "",
+            )
+        }
+        // P1-2 (§6.3): writing MCP calls (MCP_WRITE) gate here too; read-only MCP calls return null inside McpGate.
+        if (tool.startsWith("mcp_")) return com.mazharansari.axion.mcp.McpGate.requestFor(tool, args)
         if (tool !in SHELL_TOOLS) return null
         val cmd = args.s("command")?.trim().orEmpty()
         if (cmd.isBlank()) return null
+        // P1-1 (§6.2): shell git gets the same hard rules — a remembered "git push"
+        // must never silently push to main/master or force-push.
+        com.mazharansari.axion.github.GitHubGate.hardReasonForShellCommand(cmd)?.let {
+            return GateRequest(tool, cmd, pattern = "", hard = true, hardReason = it)
+        }
         hardReason(cmd)?.let { return GateRequest(tool, cmd, pattern = "", hard = true, hardReason = it) }
         if (isReadOnly(cmd)) return null
         return GateRequest(tool, cmd, pattern = patternOf(cmd))

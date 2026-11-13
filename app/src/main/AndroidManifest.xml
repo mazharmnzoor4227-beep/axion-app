@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- P1-8: exact alarms for scheduled tasks (Scheduler v2). The user can revoke this in system settings;
+         when revoked, schedules keep running inexact and the Schedules screen says so. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -60,6 +63,8 @@
         <service android:name=".linux.DevToolsService" android:exported="false" android:foregroundServiceType="dataSync" />
         <!-- v0.8.0 Phase C: keeps chat/Build runs alive in the background while the RunRegistry has work in flight -->
         <service android:name=".work.WorkService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <!-- P1-8: receives exact alarms for scheduled tasks and hands the run to the worker at once (explicit intents only) -->
+        <receiver android:name=".work.ScheduleAlarmReceiver" android:exported="false" />
         <!-- Phase F (v0.8.5): hears message notifications for assistant announcements; runs only after the owner grants Notification access in Android settings -->
         <service android:name=".assistant.AxionNotificationListener" android:exported="false" android:label="Axion notifications" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>

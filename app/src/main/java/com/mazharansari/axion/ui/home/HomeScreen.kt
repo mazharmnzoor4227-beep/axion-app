@@ -317,13 +317,17 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                 AnimatedVisibility(pillVisible, modifier = Modifier.align(Alignment.CenterHorizontally),
                     enter = fadeIn(tween(180)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 2 } + expandVertically(tween(240), expandFrom = Alignment.Bottom),
                     exit = fadeOut(tween(150)) + slideOutVertically(tween(200)) { it / 2 } + shrinkVertically(tween(220), shrinkTowards = Alignment.Bottom)) {
-                    ReadAloudPill(
-                        paused = ra.paused, elapsedMs = ra.elapsedMs, progress = ra.progress, speed = ra.speed, speedOpen = speedOpen,
-                        onPlayPause = { ra.togglePause() }, onBack = { ra.seekBy(-15_000) }, onForward = { ra.seekBy(15_000) },
-                        onSpeed = { speedOpen = !speedOpen }, onClose = { speedOpen = false; g.speaker.stop() },
-                        onSpeedAnchor = { speedAnchor = it },
-                        modifier = Modifier.padding(bottom = 16.dp),
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // P1-11: which provider actually produced this voice (Edge / Gemini / phone).
+                        ra.provenance?.let { Text("Voice: $it", style = Type.tiny, color = p.text2, modifier = Modifier.padding(bottom = 6.dp)) }
+                        ReadAloudPill(
+                            paused = ra.paused, elapsedMs = ra.elapsedMs, progress = ra.progress, speed = ra.speed, speedOpen = speedOpen,
+                            onPlayPause = { ra.togglePause() }, onBack = { ra.seekBy(-15_000) }, onForward = { ra.seekBy(15_000) },
+                            onSpeed = { speedOpen = !speedOpen }, onClose = { speedOpen = false; g.speaker.stop() },
+                            onSpeedAnchor = { speedAnchor = it },
+                            modifier = Modifier.padding(bottom = 16.dp),
+                        )
+                    }
                 }
                 // v0.12: a long task the app lost mid-way gets a visible way back, above the composer.
                 vm.interruptedTask?.let { rec ->
@@ -360,6 +364,10 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                     },
                     longTaskOn = settings.longTask,
                     onLongTask = { g.settings.update { it.copy(longTask = !it.longTask) } },
+                    // P1-3 Turbo (server): per-task toggle; off by default, and it only takes
+                    // effect when a server is set up in Settings → Turbo (server).
+                    turboOn = settings.turbo,
+                    onTurbo = { g.settings.update { it.copy(turbo = !it.turbo) } },
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 Composer(

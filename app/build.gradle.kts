@@ -128,6 +128,9 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")   // v0.4: Ubuntu base .tar.gz
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // P1-3 Turbo (server): sshj — pure-Java SSHv2, Android-friendly, no native code. 0.41.2
+    // (Oct 2026): 0.37.0 and older are vulnerable to the Terrapin attack (CVE-2023-48795).
+    implementation("com.hierynomus:sshj:0.41.2")
     // v0.12 scheduler: WorkManager wakes the app for scheduled tasks (inexact on purpose — no exact-alarm permission).
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 

@@ -46,6 +46,22 @@ object ReadAloudPlayer {
     var noticeSeq by mutableStateOf(0)
         private set
 
+    /** P1-11: which provider actually produced the voice playing right now ("Edge · Ava" / "Gemini · Kore" / "Phone · Rounded") — shown above the read-aloud pill. Null when nothing is playing. */
+    var provenance by mutableStateOf<String?>(null)
+        private set
+
+    private fun provenanceFor(voice: AxVoice): String = when (voice.family) {
+        VoiceFamily.KODEX -> "Phone · ${voice.name}"
+        VoiceFamily.NATURAL -> "Edge · ${voice.name}"
+        VoiceFamily.GEMINI -> "Gemini · ${voice.name}"
+    }
+
+    private fun routeLabel(voice: AxVoice): String = when (voice.family) {
+        VoiceFamily.KODEX -> "phone voice"
+        VoiceFamily.NATURAL -> "Edge"
+        VoiceFamily.GEMINI -> "Gemini"
+    }
+
     private fun postNotice(context: Context, text: String) {
         lastNotice = text; noticeSeq++
         android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_LONG).show()
@@ -94,8 +110,16 @@ object ReadAloudPlayer {
                 if (pl.note != null) { lastNotice = pl.note; noticeSeq++; if (missingNoticeShown.add("script:" + voice.id)) postNotice(app, pl.note) }
                 voice = pl.voice
             }
-            val ok = runTransport(app, voice, plain, my)
-            if (!ok && session == my) runTransport(app, VoiceCatalog.kodex.first(), plain, my)
+            // P1-11: Edge stays primary; a failed Edge route falls back to the same voice's Gemini counterpart
+            // (when a Gemini key is available), and everything ends on the phone's Rounded voice.
+            val chain = VoiceCatalog.voiceFallbackChain(voice, geminiKeys().isNotEmpty())
+            var ok = false
+            for ((idx, candidate) in chain.withIndex()) {
+                if (idx > 0) postNotice(app, "${chain[idx - 1].name} (${routeLabel(chain[idx - 1])}) didn't answer — reading in ${candidate.name} (${routeLabel(candidate)}) instead.")
+                ok = runTransport(app, candidate, plain, my)
+                if (ok || session != my) break
+            }
+            if (!ok && session == my) postNotice(app, "${chain.last().name} didn't answer either.")
             finish(my)
         }
     }
@@ -158,6 +182,7 @@ object ReadAloudPlayer {
         val t = Tx(my, eng, voice, chunkText(plain, size).map { Seg(it) }, 14.5f * pace)
         if (t.segs.isEmpty()) return true
         tx = t
+        provenance = provenanceFor(voice)   // P1-11: the pill shows which provider is actually speaking
         totalMs = t.total(); elapsedMs = 0L
         val ticker = scope.launch {
             var last = System.currentTimeMillis()
@@ -194,10 +219,8 @@ object ReadAloudPlayer {
                 val j = t.jump
                 if (j != null) { t.jump = null; i = j.first; offset = j.second; continue }
                 if (res == SegResult.FAILED) {
-                    if (!anySound) {
-                        postNotice(app, "${voice.name} didn't answer — using Rounded this time.")
-                        return false
-                    }
+                    // P1-11: no notice here — speak() walks the fallback chain and says which voice is next.
+                    if (!anySound) return false
                     break
                 }
                 anySound = true
@@ -404,6 +427,7 @@ object ReadAloudPlayer {
         runCatching { tts?.stop() }
         releasePlayer()
         playingMessageId = null
+        provenance = null
         paused = false; elapsedMs = 0L
         fireDone(ended)
     }
@@ -411,6 +435,7 @@ object ReadAloudPlayer {
     private fun finish(my: Int) {
         if (session != my) return
         playingMessageId = null
+        provenance = null
         paused = false
         fireDone(my)
     }
@@ -591,6 +616,10 @@ object ReadAloudPlayer {
                 VoiceFamily.NATURAL -> {
                     val smart = VoicePrefs.smartUrdu(app)
                     val rate = ((VoicePrefs.pace(app) - 1f) * 100f).roundToInt()
+                    // P1-11: one bad Edge sentence falls back to the same voice's Gemini counterpart, not straight to Rounded.
+                    val fb = VoiceCatalog.geminiFallbackFor(voice)
+                    val keys = geminiKeys()
+                    var fallbackPlayer: com.mazharansari.axion.livecall.LiveAudioPlayer? = null
                     val fetched = kotlinx.coroutines.channels.Channel<Pair<String, Deferred<File?>>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
                     launch {
                         for (sentence in s.sentences) {
@@ -609,8 +638,20 @@ object ReadAloudPlayer {
                         if (session != my) { file?.delete(); continue }
                         val ok = file != null && playFile(file)
                         file?.delete()
-                        if (!ok && session == my) deviceSay(app, sentence, VoiceCatalog.kodex.first())   // one bad sentence: say it in Rounded, keep going
+                        if (!ok && session == my) {
+                            val spokeGemini = if (fb != null && keys.isNotEmpty()) {
+                                val p = fallbackPlayer ?: com.mazharansari.axion.livecall.LiveAudioPlayer(scope, android.media.AudioAttributes.USAGE_MEDIA)
+                                    .also { fallbackPlayer = it; it.start(); it.setSpeed(speed) }
+                                var heard = false
+                                runCatching {
+                                    withContext(Dispatchers.IO) { GeminiVoice.speak(keys, fb.engineVoice, sentence) { if (session == my) { heard = true; p.enqueue(it) } } }
+                                    while (session == my && p.isSounding) kotlinx.coroutines.delay(60)
+                                }.isSuccess && heard
+                            } else false
+                            if (!spokeGemini && session == my) deviceSay(app, sentence, VoiceCatalog.kodex.first())   // still nothing: say it in Rounded, keep going
+                        }
                     }
+                    fallbackPlayer?.let { runCatching { it.stop() } }
                 }
             }
             finish(my)

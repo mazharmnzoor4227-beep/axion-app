@@ -53,6 +53,23 @@ data class ScheduleEntry(
      * 0 = never armed yet.
      */
     val anchorEpochMs: Long = 0,
+    /**
+     * P1-8 — run only when the phone is online. Off by default on purpose:
+     * on-device/local models can run a scheduled task with no network at all,
+     * and a hard network constraint would stop those schedules from ever firing.
+     */
+    val requireNetwork: Boolean = false,
+    /**
+     * P1-8 — ask for exact timing (an exact alarm where the system allows it).
+     * When the system does not allow exact alarms, the schedule still runs —
+     * inexact, and the Schedules screen says so instead of pretending exact.
+     */
+    val exactTiming: Boolean = true,
+    /**
+     * P1-8 — bounded retries for this schedule: the initial run plus this many
+     * retries (0..5), with exponential backoff between them. Default 2.
+     */
+    val maxRetries: Int = 2,
 ) {
     /** "Daily at 09:00" / "Every Monday at 09:00" / "Once, 12 Nov 2026 at 09:00". */
     fun describe(): String {
@@ -70,11 +87,30 @@ data class ScheduleEntry(
     }
 }
 
+/**
+ * P1-8 — an explicit failure record for a scheduled run. Every terminal run
+ * ends in either a saved result chat + notification or one of these, so a
+ * run can never vanish silently (HI-7): the Schedules screen lists recent
+ * failures, newest first.
+ */
+@Serializable
+data class ScheduleFailure(
+    val id: String,
+    val scheduleId: String,
+    val title: String,
+    val error: String,
+    val atMs: Long,
+)
+
 class SchedulesStore(ctx: Context) {
     private val file = File(ctx.filesDir, "schedules.json")
+    private val failuresFile = File(ctx.filesDir, "schedule-failures.json")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val _entries = MutableStateFlow(runCatching { json.decodeFromString<List<ScheduleEntry>>(file.readText()) }.getOrDefault(emptyList()))
     val entries: StateFlow<List<ScheduleEntry>> = _entries.asStateFlow()
+    private val _failures = MutableStateFlow(runCatching { json.decodeFromString<List<ScheduleFailure>>(failuresFile.readText()) }.getOrDefault(emptyList()))
+    /** P1-8: explicit failure records, newest first (see [ScheduleFailure]). */
+    val failures: StateFlow<List<ScheduleFailure>> = _failures.asStateFlow()
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private fun mutate(f: (List<ScheduleEntry>) -> List<ScheduleEntry>) {
@@ -94,7 +130,45 @@ class SchedulesStore(ctx: Context) {
     /** P0-7: persist the stable anchor for [id] (see [ScheduleEntry.anchorEpochMs]). */
     fun setAnchor(id: String, anchorMs: Long) = mutate { list -> list.map { if (it.id == id) it.copy(anchorEpochMs = anchorMs) else it } }
 
+    /** P1-8: the schedule runs only when the phone is online. */
+    fun setRequireNetwork(id: String, on: Boolean) = mutate { list -> list.map { if (it.id == id) it.copy(requireNetwork = on) else it } }
+
+    /** P1-8: the schedule asks for exact timing where the system allows it. */
+    fun setExactTiming(id: String, on: Boolean) = mutate { list -> list.map { if (it.id == id) it.copy(exactTiming = on) else it } }
+
     fun markRan(id: String, status: String) = mutate { list ->
         list.map { if (it.id == id) it.copy(lastRunAt = System.currentTimeMillis(), lastStatus = status.take(200)) else it }
+    }
+
+    /**
+     * P1-8: records that a run is being retried (bounded, exponential backoff)
+     * so the retry is visible on the schedule's card — the retry IS the same
+     * run, so no result chat is saved yet.
+     */
+    fun recordRetry(id: String, attempt: Int, maxAttempts: Int, error: String, delayMs: Long) {
+        val minutes = delayMs / 60_000L
+        val whenText = if (minutes < 60) "about $minutes minutes" else "about ${minutes / 60} hours"
+        markRan(id, "Retrying (attempt $attempt of $maxAttempts) — next try in $whenText: ${error.take(120)}")
+    }
+
+    /**
+     * P1-8: appends an explicit failure record for a run that ended without a
+     * saved result chat (for example the chat could not be saved). Kept to the
+     * newest 50; the Schedules screen shows them.
+     */
+    fun recordFailure(scheduleId: String, title: String, error: String) {
+        val record = ScheduleFailure(
+            id = java.util.UUID.randomUUID().toString(),
+            scheduleId = scheduleId, title = title,
+            error = error.take(300), atMs = System.currentTimeMillis(),
+        )
+        _failures.value = (listOf(record) + _failures.value).take(50)
+        val snap = _failures.value
+        io.launch { synchronized(failuresFile) { runCatching { failuresFile.writeText(json.encodeToString(snap)) } } }
+    }
+
+    fun clearFailures() {
+        _failures.value = emptyList()
+        io.launch { synchronized(failuresFile) { runCatching { failuresFile.delete() } } }
     }
 }

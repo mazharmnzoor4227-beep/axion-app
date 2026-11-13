@@ -83,6 +83,8 @@ fun AppRoot(vm: ChatViewModel) {
                         Route.Memory -> MemoryScreen(vm, back)
                         Route.Approvals -> com.mazharansari.axion.ui.settings.ApprovalsScreen(vm, back)
                         Route.Schedules -> com.mazharansari.axion.ui.settings.SchedulesScreen(vm, back)
+                        Route.Turbo -> com.mazharansari.axion.ui.settings.TurboScreen(vm, back)
+                        Route.GitHub -> com.mazharansari.axion.ui.settings.GitHubScreen(vm, back)
                     } }
                 }
                 // v0.8.3: while a Live call is held by the view model and the call screen is not

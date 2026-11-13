@@ -22,6 +22,17 @@ class RunCommandTool : Tool {
         val cmd = args.s("command").orEmpty()
         if (cmd.isBlank()) return@withContext ToolOutput("Empty command", isError = true)
         val timeout = (args.i("timeout_sec") ?: 60).coerceIn(1, 600).toLong()
+        // P1-3 Turbo (server): when the composer toggle is on for this task AND the user's server
+        // is set up, the command runs on their own server and the workspace syncs back — the
+        // same tool, the same output shape, just a bigger computer. Otherwise on-device Linux.
+        val cloud = com.mazharansari.axion.linux.LinuxHub.cloud
+        if (ctx.turbo && cloud?.useTurbo(true) == true) {
+            val (code, text) = try { cloud.runInWorkspace(cmd, ctx.workspace.root, timeout * 1000) { line -> ctx.progress(line.takeLast(4000)) } }
+                catch (e: CancellationException) { throw e } catch (e: Throwable) { return@withContext ToolOutput("Turbo server error: ${e.message}", isError = true) }
+            val head = if (code == -1) "[timed out after ${timeout}s on the server]\n" else if (code != 0) "[exit code $code on the server]\n" else "[ran on the Turbo server]\n"
+            val body = text.ifEmpty { "(no output)" }
+            return@withContext ToolOutput((head + body).clip(10000), display = (head + body).clip(20000), isError = code != 0, exitCode = code)
+        }
         // v0.4: inside the private Ubuntu (PRoot) when Linux is installed — real bash, Python, Node… whatever the user installed.
         val linux = com.mazharansari.axion.linux.LinuxHub.linux
         if (linux != null && linux.isInstalled() && ctx.workspace.root.canonicalPath == linux.workspaceHost.canonicalPath) {

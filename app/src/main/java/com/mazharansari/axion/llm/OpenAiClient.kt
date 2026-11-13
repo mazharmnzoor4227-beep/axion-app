@@ -50,10 +50,12 @@ class OpenAiClient(
                 val src = r.body!!.source()
                 val calls = sortedMapOf<Int, PartialCall>()
                 var finish: String? = null
+                var usage: com.mazharansari.axion.quota.TokenUsage? = null
                 val ctype = r.header("content-type").orEmpty()
                 if (!ctype.contains("event-stream")) {
                     // Some gateways ignore stream=true and answer one JSON object.
                     val obj = Json.parseToJsonElement(src.readUtf8()).jsonObject
+                    usage = com.mazharansari.axion.quota.LlmUsage.parseOpenAi(obj)
                     val msg = obj["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
                     (msg?.str("reasoning_content") ?: msg?.str("reasoning"))?.let { if (it.isNotEmpty()) emit(LlmEvent.Reasoning(it)) }
                     msg?.str("content")?.let { if (it.isNotEmpty()) emit(LlmEvent.Text(it)) }
@@ -71,6 +73,8 @@ class OpenAiClient(
                             val m = e.toString()
                             throw LlmException(shortError(m, 0), classifyHttp(0, m))
                         }
+                        // P1-10 (ME-4): the last chunk carries the real token counts (asked for in buildBody).
+                        com.mazharansari.axion.quota.LlmUsage.parseOpenAi(obj)?.let { usage = it }
                         val choice = obj["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                         val delta = choice["delta"]?.jsonObject
                         if (delta != null) {
@@ -92,6 +96,8 @@ class OpenAiClient(
                         ToolCall(id = c.id.ifEmpty { "call_${System.nanoTime()}_$i" }, name = c.name, arguments = c.args.toString().ifBlank { "{}" })
                     }))
                 }
+                // P1-10 (ME-4): real token counts for the Quota screen; absent usage stays UNKNOWN, never 0.
+                usage?.let { com.mazharansari.axion.quota.QuotaHooks.reportUsage(tag, provider.id, req.model, it) }
                 emit(LlmEvent.Finished(finish))
             }
         } catch (e: IOException) {
@@ -158,9 +164,16 @@ class OpenAiClient(
         }
     }
 
+    /** P1-10 (ME-4): ask for the usage object in the last stream chunk. Only on providers whose docs (or the
+     * OpenAI spec they follow) accept `stream_options.include_usage` — other OpenAI-compatible providers still get
+     * their usage parsed whenever they send it, they just aren't asked for it. */
+    internal fun includeUsage(providerId: String): Boolean =
+        providerId in setOf("openai", "groq", "deepseek", "openrouter", "together", "xai")
+
     fun buildBody(req: LlmRequest): JsonObject = buildJsonObject {
         put("model", req.model)
         put("stream", true)
+        if (includeUsage(provider.id)) putJsonObject("stream_options") { put("include_usage", true) }
         req.temperature?.let { put("temperature", it) }
         if (req.quick) quickReasoning(provider.id, req.model)?.forEach { (k, v) -> put(k, v) }
         else if (req.effort == "low") lowReasoning(provider.id, req.model)?.forEach { (k, v) -> put(k, v) }

@@ -18,7 +18,8 @@ import java.util.concurrent.TimeUnit
  * this uses the Gemini Live connection as a "read it exactly" engine instead: one short-lived Live session per
  * chunk, text in, 24 kHz PCM out as it is generated. Tested from Tab's box on 1 Nov 2026 with gemini-3.8-live:
  * verbatim in English, Roman Urdu and Urdu script (checked with Whisper), questions read rather than answered,
- * first audio ≈0.5 s after the text is sent.
+ * first audio ≈0.5 s after the text is sent. P1-11: the gemini-3.8-live ID was re-verified 13 Nov 2026 against
+ * Google's AI Studio models page (default Live API model, Stable) — see LiveCallProtocol.MODEL.
  */
 object GeminiVoice {
     private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).build()

@@ -30,7 +30,7 @@ private fun parseTime(raw: String?): Pair<Int, Int>? {
 
 class ScheduleCreateTool : Tool {
     override val spec = ToolSpec("schedule_create",
-        "Schedule a task for Axion to run later ON ITS OWN (the user does not need to be in the app). Use when the user asks for something at a time or repeating: 'kal subah 9 baje…', 'roz sham ko…', 'every Monday…'. Fill the fields from what the user said — resolve relative words like kal/parso/agle Monday into a concrete date/time yourself using today's date from your prompt. type: 'once' (needs date YYYY-MM-DD + time), 'daily' (time only), 'weekly' (weekday name + time). The task runs as a fresh chat; results are saved as a new conversation and the user is notified. Times are the phone's local time; Android may run it a few minutes late.",
+        "Schedule a task for Axion to run later ON ITS OWN (the user does not need to be in the app). Use when the user asks for something at a time or repeating: 'kal subah 9 baje…', 'roz sham ko…', 'every Monday…'. Fill the fields from what the user said — resolve relative words like kal/parso/agle Monday into a concrete date/time yourself using today's date from your prompt. type: 'once' (needs date YYYY-MM-DD + time), 'daily' (time only), 'weekly' (weekday name + time). The task runs as a fresh chat; results are saved as a new conversation and the user is notified. Times are the phone's local time; with exact timing (default) it fires at the set time where the system allows exact alarms, otherwise it may run a few minutes late. Set require_network=true when the task needs the internet (it waits for a connection instead of failing offline).",
         schema {
             str("title", "Short name for the schedule, e.g. 'Morning headlines'")
             str("prompt", "The full task Axion should do when it fires, written as an instruction to yourself")
@@ -38,6 +38,9 @@ class ScheduleCreateTool : Tool {
             str("time", "24-hour 'HH:MM', e.g. '09:00'")
             str("date", "For type 'once': 'YYYY-MM-DD'", required = false)
             str("weekday", "For type 'weekly': 'Monday'…'Sunday'", required = false)
+            bool("require_network", "Run only when the phone is online (default false — local-model tasks run offline)", required = false)
+            bool("exact", "Ask for exact timing at the set time (default true; falls back to inexact when exact alarms are not allowed)", required = false)
+            int("max_retries", "Retries after a failure, 0-5 (default 2, with exponential backoff)", required = false)
         })
     override fun label(args: JsonObject) = StepLabel(StepKind.OTHER, "Scheduling", args.s("title").orEmpty().take(48))
     override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput {
@@ -49,14 +52,19 @@ class ScheduleCreateTool : Tool {
         val (hour, minute) = parseTime(args.s("time")) ?: return ToolOutput("Give the time as 24-hour HH:MM (e.g. 09:00).", isError = true)
         val typeName = args.s("type")?.trim()?.lowercase()
         val zone = ZoneId.systemDefault()
+        val requireNetwork = args.b("require_network") ?: false
+        val exactTiming = args.b("exact") ?: true
+        val maxRetries = (args.i("max_retries") ?: 2).coerceIn(0, 5)
         val entry = when (typeName) {
             "daily" -> ScheduleEntry(UUID.randomUUID().toString(), title, prompt, ScheduleType.DAILY, hour, minute,
-                createdAt = System.currentTimeMillis())
+                createdAt = System.currentTimeMillis(),
+                requireNetwork = requireNetwork, exactTiming = exactTiming, maxRetries = maxRetries)
             "weekly" -> {
                 val dow = ScheduleEntry.dayOfWeek(args.s("weekday"))
                     ?: return ToolOutput("For a weekly schedule, give the weekday ('Monday'…'Sunday').", isError = true)
                 ScheduleEntry(UUID.randomUUID().toString(), title, prompt, ScheduleType.WEEKLY, hour, minute,
-                    dayOfWeek = dow, createdAt = System.currentTimeMillis())
+                    dayOfWeek = dow, createdAt = System.currentTimeMillis(),
+                    requireNetwork = requireNetwork, exactTiming = exactTiming, maxRetries = maxRetries)
             }
             "once" -> {
                 val date = runCatching { LocalDate.parse(args.s("date")?.trim()) }.getOrNull()
@@ -64,7 +72,8 @@ class ScheduleCreateTool : Tool {
                 val at = LocalDateTime.of(date, LocalTime.of(hour, minute)).atZone(zone).toInstant().toEpochMilli()
                 if (at <= System.currentTimeMillis()) return ToolOutput("That date/time is already past — pick a future time.", isError = true)
                 ScheduleEntry(UUID.randomUUID().toString(), title, prompt, ScheduleType.ONCE, hour, minute,
-                    atEpochMs = at, createdAt = System.currentTimeMillis())
+                    atEpochMs = at, createdAt = System.currentTimeMillis(),
+                    requireNetwork = requireNetwork, exactTiming = exactTiming, maxRetries = maxRetries)
             }
             else -> return ToolOutput("type must be 'once', 'daily' or 'weekly'.", isError = true)
         }
@@ -72,7 +81,13 @@ class ScheduleCreateTool : Tool {
         ScheduleEngine.arm(appCtx, entry, store)
         val next = ScheduleEngine.nextRunMs(entry)
         val whenText = java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.ENGLISH).format(java.util.Date(next))
-        return ToolOutput("Scheduled \"${entry.title}\" — ${entry.describe()}. First run: $whenText. When it fires, Axion does the task on its own, saves the result as a new chat and notifies the user. It is listed in Settings → Schedules, where it can be switched off or deleted.",
+        val timing = if (entry.exactTiming && com.mazharansari.axion.work.ExactAlarms.canScheduleExactAlarms(appCtx))
+            "Exact timing is on — it fires at the set time."
+        else if (entry.exactTiming)
+            "Exact alarms are not allowed on this phone, so it may run a few minutes late (see Settings → Schedules to allow them)."
+        else "Inexact timing (exact timing was not asked for) — it may run a few minutes late."
+        val network = if (entry.requireNetwork) " It runs only when the phone is online." else ""
+        return ToolOutput("Scheduled \"${entry.title}\" — ${entry.describe()}. First run: $whenText. $timing$network When it fires, Axion does the task on its own, saves the result as a new chat and notifies the user. It is listed in Settings → Schedules, where it can be switched off or deleted.",
             doneTitle = "Scheduled: ${entry.title}")
     }
 }
@@ -87,9 +102,12 @@ class ScheduleListTool : Tool {
         val list = store.entries.value
         if (list.isEmpty()) return ToolOutput("No scheduled tasks yet. Create one with schedule_create.")
         val fmt = java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.ENGLISH)
+        val exactAllowed = ctx.appCtx?.let { com.mazharansari.axion.work.ExactAlarms.canScheduleExactAlarms(it) } ?: false
         val out = list.joinToString("\n") { e ->
             "- [${e.id}] \"${e.title}\" — ${e.describe()} — ${if (e.enabled) "ON" else "OFF"}" +
                 (if (e.enabled) " — next: ${fmt.format(java.util.Date(ScheduleEngine.nextRunMs(e)))}" else "") +
+                (if (e.requireNetwork) " — needs network" else "") +
+                " — " + if (e.exactTiming && exactAllowed) "exact timing" else "inexact timing" +
                 (if (e.lastRunAt > 0) " — last run ${fmt.format(java.util.Date(e.lastRunAt))}: ${e.lastStatus.ifBlank { "done" }}" else " — not run yet")
         }
         return ToolOutput("Scheduled tasks (${list.size}):\n$out", doneTitle = "${list.size} schedules")

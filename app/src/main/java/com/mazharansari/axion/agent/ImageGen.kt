@@ -22,8 +22,24 @@ import java.util.concurrent.TimeUnit
  *  3. Pollinations (no key; verified 1 Nov 2026: works, 1 image / 45 s per IP, small watermark)
  */
 class ImageGen(private val keys: () -> Map<String, String>, private val outDir: File) {
-    data class Result(val file: File, val provider: String)
+    data class Result(val file: File, val provider: String, val model: String? = null)
     private val slow = Http.client.newBuilder().readTimeout(150, TimeUnit.SECONDS).build()
+
+    companion object {
+        /**
+         * P1-11: Gemini image models, verified 13 Nov 2026 against Google's AI Studio models page and its
+         * deprecations page (https://aistudio.google.com/docs/models). gemini-3.8-live is the default Live model
+         * (Stable) — see LiveCallProtocol.MODEL. Order: newest first.
+         *  - gemini-nano-banana-2.1 — Nano Banana 2.1, New + Stable.
+         *  - gemini-3.1-flash-image — Nano Banana 2, listed.
+         *  - gemini-3.1-flash-lite-image — Nano Banana 2 Lite, listed.
+         *  - gemini-2.5-flash-image — listed, retires 15 Mar 2027 (last resort).
+         * REMOVED: gemini-3.1-flash-image-preview — retired 25 Jun 2026 (deprecations page).
+         */
+        val GEMINI_IMAGE_MODELS = listOf(
+            "gemini-nano-banana-2.1", "gemini-3.1-flash-image", "gemini-3.1-flash-lite-image", "gemini-2.5-flash-image",
+        )
+    }
 
     suspend fun generate(prompt: String, aspect: String = "1:1"): Result = withContext(Dispatchers.IO) {
         outDir.mkdirs()
@@ -47,7 +63,7 @@ class ImageGen(private val keys: () -> Map<String, String>, private val outDir: 
             }
         }.toString()
         var last = "no image model"
-        for (model in listOf("gemini-3.1-flash-image", "gemini-3.1-flash-image-preview", "gemini-2.5-flash-image", "gemini-nano-banana-2.1")) {
+        for (model in GEMINI_IMAGE_MODELS) {
             val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
                 .header("x-goog-api-key", key).post(body.toRequestBody("application/json".toMediaType())).build()
             val (code, text) = slow.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
@@ -58,7 +74,7 @@ class ImageGen(private val keys: () -> Map<String, String>, private val outDir: 
                 ?: run { last = "no image returned"; null } ?: continue
             val f = newFile(if (data["mimeType"]?.jsonPrimitive?.content?.contains("jpeg") == true) "jpg" else "png")
             f.writeBytes(Base64.decode(data["data"]!!.jsonPrimitive.content, Base64.DEFAULT))
-            return Result(f, "Gemini")
+            return Result(f, "Gemini", model)
         }
         error(last)
     }
@@ -73,7 +89,7 @@ class ImageGen(private val keys: () -> Map<String, String>, private val outDir: 
             val bytes = r.body?.bytes() ?: ByteArray(0)
             if (!r.isSuccessful || r.header("content-type")?.startsWith("image") != true) error("HTTP ${r.code} ${String(bytes).take(120)}")
             val f = newFile(if (r.header("content-type")!!.contains("jpeg")) "jpg" else "png"); f.writeBytes(bytes)
-            return Result(f, "Hugging Face FLUX")
+            return Result(f, "Hugging Face FLUX", "black-forest-labs/FLUX.1-schnell")
         }
     }
 
@@ -106,7 +122,7 @@ class GenerateImageTool(private val gen: ImageGen) : Tool {
     override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput {
         val r = runCatching { gen.generate(args.s("prompt").orEmpty(), args.s("aspect") ?: "1:1") }
             .getOrElse { return ToolOutput("Image generation failed: ${it.message}", isError = true, doneTitle = "Image failed") }
-        return ToolOutput("Image created with ${r.provider} and shown to the user (${ctx.workspace.rel(r.file)}).",
+        return ToolOutput("Image created with ${r.provider}${r.model?.let { " · $it" } ?: ""} and shown to the user (${ctx.workspace.rel(r.file)}).",
             artifact = Artifact(r.file.name, Mime.of(r.file.name), r.file.absolutePath, r.file.length()), doneTitle = "Generated image")
     }
 }

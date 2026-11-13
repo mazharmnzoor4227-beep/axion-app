@@ -14,7 +14,10 @@ import java.io.File
  *  - `npm run build` when the project has a build script and Web is installed (before the screenshot);
  *  - Python files byte-compiled when Python is installed;
  *  - headless Chromium screenshot at phone size + console errors, when Browser automation is installed.
- * Android projects are not auto-built here (minutes on a phone) — the Build APK button does that.
+ *  - Android projects (P1-9): a real `:app:assembleDebug` Gradle build when the Android
+ *    toolchains are installed, and the debug APK artifact must actually exist afterwards —
+ *    a claimed success without an APK is a failure. This is slow on a phone (minutes, like
+ *    the Build APK button); it is the price of verifying Android the same way web is verified.
  */
 class ProjectVerifier(
     private val linux: LinuxRuntime?,
@@ -34,6 +37,27 @@ class ProjectVerifier(
             val cmd = (if (needInstall) "npm install --no-fund --no-audit && " else "") + "npm run build"
             return "set -o pipefail; cd '$guest' && $cmd 2>&1 | tail -n 60"
         }
+
+        /** Pure: an Android (Gradle) project — an app module build file, or a root build file applying the Android application plugin. */
+        fun isAndroidProject(folder: File): Boolean {
+            if (File(folder, "app/build.gradle.kts").isFile || File(folder, "app/build.gradle").isFile) return true
+            val root = File(folder, "build.gradle.kts").takeIf { it.isFile } ?: File(folder, "build.gradle").takeIf { it.isFile } ?: return false
+            return runCatching { root.readText().contains("com.android.application") }.getOrDefault(false)
+        }
+
+        /**
+         * The exact guest-shell command for the Android build check (P1-9): the same pipefail
+         * rule as [buildCheckCommand] — a failing Gradle build must surface as a non-zero exit
+         * code, never DONE. Uses the project's own gradlew when it has one.
+         */
+        fun androidBuildCheckCommand(guest: String, useGradlew: Boolean): String {
+            val gradle = if (useGradlew) "./gradlew" else "gradle"
+            return "set -o pipefail; cd '$guest' && $gradle :app:assembleDebug --console=plain 2>&1 | tail -n 60"
+        }
+
+        /** The debug APK a successful Android build must have produced (newest first). */
+        fun findDebugApk(folder: File): File? =
+            File(folder, "app/build/outputs/apk/debug").walkTopDown().filter { it.isFile && it.extension == "apk" }.maxByOrNull { it.lastModified() }
     }
 
     override suspend fun verify(project: Project, folder: File, onStep: (Step) -> Unit): BuildVerifier.Report = coroutineScope {
@@ -65,6 +89,20 @@ class ProjectVerifier(
             done(s, code == 0, out.ifBlank { "OK" })
             if (code != 0) problems += "Python doesn't compile:\n" + out.takeLast(1500)
         }
+        // P1-9: Android projects are verified with a real Gradle build, the same way web
+        // projects get a real `npm run build` — plus the debug APK must actually exist.
+        // Skipped (like the web check) when Linux or the Android toolchains are not installed.
+        val android = async(Dispatchers.IO) {
+            if (!canLinux || !isAndroidProject(folder) || !installed("android") || !installed("androidsdk")) return@async
+            val s = step("android", StepKind.COMMAND, "Bash", "Gradle :app:assembleDebug (Android check)")
+            val (code, out) = linux!!.run(androidBuildCheckCommand(guest, File(folder, "gradlew").isFile), timeoutMs = 45 * 60_000L, guestCwd = guest)
+            val apk = findDebugApk(folder)
+            val ok = code == 0 && apk != null && apk.length() > 0
+            done(s, ok, out)
+            if (code != 0) problems += "Android build failed (`:app:assembleDebug`):\n" + out.lines().filter { it.isNotBlank() }.takeLast(25).joinToString("\n")
+            else if (apk == null) problems += "Android build reported success but no debug APK was produced."
+            else notes += "Android build OK (${apk.name})."
+        }
         build.await()
         val site = async(Dispatchers.IO) {
             val s = step("site", StepKind.SEARCH, "Checked", "site files")
@@ -90,6 +128,7 @@ class ProjectVerifier(
             } finally { server?.stop() }
         }
         py.await()
+        android.await()
         BuildVerifier.Report(problems.distinct(), notes.toList(), shot, siteDir != null)
     }
 }

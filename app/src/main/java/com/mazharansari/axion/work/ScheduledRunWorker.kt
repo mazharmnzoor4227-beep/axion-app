@@ -75,15 +75,36 @@ data class ScheduledRunDecision(
  * agent run is capped at [RUN_BUDGET_MS] (9 minutes) with withTimeout, so the
  * worker stops itself in time to save whatever partial text/steps exist and
  * record the outcome — instead of being killed mid-run with no chat saved,
- * markRan never called, and a ONCE schedule left armed forever. This is the
- * "report" half of the limit: a long job is NOT split across worker
- * invocations (that is the later Scheduler v2 item), it is reported honestly.
+ * markRan never called, and a ONCE schedule left armed forever. P0-9 was
+ * the "report" half of the limit; P1-8 adds the other half — a run that hits
+ * the budget checkpoints and resumes in the next invocation (see below).
  *
- * No network constraint is set on purpose: on-device/local models can run a
- * scheduled task with no network at all, and a hard CONNECTED constraint
- * would stop those schedules from ever firing. A network-dependent run with
- * no network fails like any other agent error — recorded, then retried with
- * backoff while attempts remain.
+ * P0-9: no network constraint was set on purpose — on-device/local models
+ * can run a scheduled task with no network at all, and a hard CONNECTED
+ * constraint would stop those schedules from ever firing. A network-dependent
+ * run with no network failed like any other agent error — recorded, then
+ * retried with backoff while attempts remain. P1-8 keeps that default and
+ * adds an opt-in per-schedule network requirement (see below).
+ *
+ * P1-8 (Scheduler v2 — the proper fix for HI-5/HI-7):
+ * - Exact timing: [ScheduleEngine] arms an exact alarm where permitted; this
+ *   worker is unchanged by which trigger fired it.
+ * - Network: an entry with requireNetwork checks connectivity first
+ *   ([isOnline]) and retries while offline instead of failing at once; the
+ *   WorkManager job also carries a CONNECTED constraint.
+ * - Retry: bounded by the entry's own maxRetries, exponential backoff
+ *   ([RetryPolicy]), and RECORDED — a retry writes a "Retrying…" status on
+ *   the schedule's card, so a retrying run is visible instead of silent.
+ * - Long runs split across invocations: a run that hits the 9-minute budget
+ *   checkpoints its partial text ([RunCheckpointPolicy]) and the next
+ *   invocation resumes from it (up to [RunCheckpointPolicy.MAX_SEGMENTS]
+ *   segments); after that it ends with a failure record carrying the partial
+ *   result. The saved result chat merges all segments, so the user reads one
+ *   whole result.
+ * - Guaranteed outcome: every terminal run ends in a saved result chat +
+ *   notification, or — if even saving fails — an explicit failure record in
+ *   [SchedulesStore.recordFailure] that the Schedules screen shows. A run can
+ *   no longer vanish.
  */
 class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineWorker(appCtx, params) {
 
@@ -92,8 +113,20 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
         val app = applicationContext as? AxionApp ?: return Result.failure()
         val g = app.graph
         val store = g.schedules
-        val entry = store.get(id) ?: return Result.failure()
+        val entry = store.get(id) ?: run {
+            // Deleted between enqueue and fire: still leave a record, never vanish silently.
+            runCatching { store.recordFailure(id, "Scheduled task", "The schedule no longer exists, so the run could not start.") }
+            return Result.failure()
+        }
         if (!entry.enabled) return Result.failure()
+
+        // P1-8: a run split across invocations resumes from its checkpoint.
+        val checkpointStore = ScheduleCheckpointStore(applicationContext)
+        val checkpoint = checkpointStore.load(id)
+        val runId = checkpoint?.runId ?: UUID.randomUUID().toString()
+        val runStartedAt = checkpoint?.startedAtMs ?: System.currentTimeMillis()
+        val effectivePrompt = checkpoint?.let { RunCheckpointPolicy.continuationPrompt(entry.prompt, it) } ?: entry.prompt
+        val maxRetries = entry.maxRetries.coerceIn(0, 5)
 
         val settings = g.settings.state.value
         val text = StringBuilder()
@@ -110,7 +143,14 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
         var error = ""
         var answer = ""
         var noAttempts = false
-        try {
+        var timedOut = false
+        var networkUnavailable = false
+        // P1-8: a schedule that needs network never starts the agent offline —
+        // it waits (bounded retry) instead of burning a run on a certain failure.
+        if (entry.requireNetwork && !isOnline(applicationContext)) {
+            networkUnavailable = true
+            error = NETWORK_ERROR
+        } else try {
             val attempts = headlessAttempts(g)
             if (attempts.isEmpty()) {
                 noAttempts = true
@@ -127,7 +167,7 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
                 )
                 answer = withTimeout(RUN_BUDGET_MS) {
                     agent.run(
-                        emptyList(), UserItem(entry.prompt),
+                        emptyList(), UserItem(effectivePrompt),
                         attempts = { attempts }, sink = sink,
                         profile = Profile(settings.assistantName.ifBlank { "Axion" }, settings.userName, settings.replyLanguage, settings.instructions),
                         intent = IntentGate.classify(entry.prompt, false),
@@ -136,7 +176,9 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
             }
         } catch (e: TimeoutCancellationException) {
             // Our own 9-minute budget (not a WorkManager kill): the partial
-            // text/steps in the sink are still here and get saved below.
+            // text/steps in the sink are still here. P1-8: the run checkpoints
+            // and resumes in the next invocation instead of ending here.
+            timedOut = true
             error = TIMEOUT_ERROR
         } catch (e: CancellationException) {
             // WorkManager stopped the worker (app killed, constraints changed).
@@ -146,13 +188,18 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
             val nowMs = System.currentTimeMillis()
             val partialText = synchronized(text) { text.toString() }.ifBlank { answer }
             val partialSteps = synchronized(steps) { steps.values.toList() }
-            saveRunChat(g, entry, partialText, partialSteps, STOPPED_ERROR, nowMs)
-            store.markRan(id, STOPPED_ERROR)
-            if (entry.type == ScheduleType.ONCE) {
-                store.setEnabled(id, false)
-                ScheduleEngine.disarm(applicationContext, id)
+            checkpointStore.clear(id)
+            runCatching {
+                saveRunChat(g, entry, partialText, partialSteps, STOPPED_ERROR, nowMs)
+                store.markRan(id, STOPPED_ERROR)
+                if (entry.type == ScheduleType.ONCE) {
+                    store.setEnabled(id, false)
+                    ScheduleEngine.disarm(applicationContext, id)
+                }
+                notify(applicationContext, entry.title, STOPPED_ERROR, ok = false, id = id.hashCode())
+            }.onFailure {
+                runCatching { store.recordFailure(id, entry.title, "The scheduled run was stopped, and its partial result could not be saved: ${it.message ?: "unknown error"}") }
             }
-            notify(applicationContext, entry.title, STOPPED_ERROR, ok = false, id = id.hashCode())
             throw e
         } catch (e: NoModelException) { error = e.message.orEmpty() }
         catch (e: Throwable) { error = e.message ?: "The scheduled run failed." }
@@ -165,28 +212,70 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
             else -> ""
         }
         val stepList = synchronized(steps) { steps.values.toList() }
+        // P1-8: the saved result merges every segment, so a split run still reads as one whole result.
+        val savedText = when {
+            checkpoint == null -> finalText
+            finalText.isBlank() -> checkpoint.partialText
+            checkpoint.partialText.isBlank() -> finalText
+            else -> checkpoint.partialText + "\n\n[continued]\n" + finalText
+        }
         val effectiveError = when {
             error.isNotBlank() -> error
-            finalText.isBlank() && stepList.isEmpty() -> EMPTY_RESULT_ERROR
+            savedText.isBlank() && stepList.isEmpty() -> EMPTY_RESULT_ERROR
             else -> ""
         }
         val decision = decideOutcome(
             entryFound = true, enabled = true, hasAttempts = !noAttempts,
-            error = effectiveError, hasAnswer = finalText.isNotBlank(), hasSteps = stepList.isNotEmpty(),
+            error = effectiveError, hasAnswer = savedText.isNotBlank(), hasSteps = stepList.isNotEmpty(),
             isOnce = entry.type == ScheduleType.ONCE, runAttemptCount = runAttemptCount,
+            maxRetries = maxRetries, networkUnavailable = networkUnavailable,
+            noMoreRetries = timedOut && RunCheckpointPolicy.isExhausted(checkpoint),
         )
-        if (decision.saveChat) {
-            saveRunChat(g, entry, finalText, stepList, effectiveError, now)
-            store.markRan(id, decision.markRanStatus ?: if (effectiveError.isBlank()) "done" else effectiveError)
-            if (decision.disableOnce) {
-                store.setEnabled(id, false)
-                ScheduleEngine.disarm(applicationContext, id)
+        if (decision.result == ScheduledRunResult.RETRY) {
+            // P1-8: a retry is recorded on the schedule's card (visible, with
+            // the backoff wait) — and a timed-out run checkpoints so the next
+            // invocation resumes instead of starting over.
+            if (timedOut) {
+                checkpointStore.save(
+                    RunCheckpointPolicy.nextSegment(
+                        checkpoint, id, runId, runStartedAt, entry.prompt, finalText, stepList.size, now))
             }
-            notify(applicationContext, entry.title, if (effectiveError.isBlank()) finalText else effectiveError,
-                ok = effectiveError.isBlank(), id = id.hashCode())
+            store.recordRetry(id, runAttemptCount + 1, maxRetries + 1, effectiveError, RetryPolicy.delayMs(runAttemptCount))
+            return Result.retry()
         }
-        // On RETRY nothing is saved, recorded or disabled: the retry IS the
-        // same run, and the ONCE schedule stays armed until an outcome exists.
+        // On RETRY no result chat is saved and the ONCE schedule stays armed
+        // until an outcome exists — but the retry itself IS recorded (see
+        // recordRetry above), so a retrying run is visible on its card.
+        if (decision.saveChat) {
+            checkpointStore.clear(id)
+            // P1-8: a terminal run ends in a saved chat + notification, or —
+            // if even that fails — an explicit failure record. Never silence.
+            val saved = runCatching {
+                saveRunChat(g, entry, savedText, stepList, effectiveError, now)
+                store.markRan(id, decision.markRanStatus ?: if (effectiveError.isBlank()) "done" else effectiveError)
+                if (decision.disableOnce) {
+                    store.setEnabled(id, false)
+                    ScheduleEngine.disarm(applicationContext, id)
+                }
+            }
+            if (saved.isFailure) {
+                runCatching {
+                    store.recordFailure(id, entry.title,
+                        "The scheduled result could not be saved: ${saved.exceptionOrNull()?.message ?: "unknown error"}. " +
+                            if (effectiveError.isBlank()) "Partial result: ${savedText.take(200)}" else effectiveError)
+                    store.markRan(id, "failed — result could not be saved")
+                    notify(applicationContext, entry.title, "The scheduled task ran but its result could not be saved.", ok = false, id = id.hashCode())
+                }
+            } else {
+                val notified = runCatching {
+                    notify(applicationContext, entry.title, if (effectiveError.isBlank()) savedText else effectiveError,
+                        ok = effectiveError.isBlank(), id = id.hashCode())
+                }
+                if (notified.isFailure) {
+                    runCatching { store.recordFailure(id, entry.title, "The scheduled result was saved as a chat, but the notification could not be sent.") }
+                }
+            }
+        }
         return when (decision.result) {
             ScheduledRunResult.SUCCESS -> Result.success()
             ScheduledRunResult.RETRY -> Result.retry()
@@ -196,13 +285,17 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
 
     /** Saves one run as a new chat. Does not touch the schedule itself. */
     private fun saveRunChat(g: Graph, entry: ScheduleEntry, finalText: String, stepList: List<Step>, error: String, now: Long) {
+        // P1-8: the partial text is kept even on failure — a run that produced
+        // something before failing (a timed-out split run, an agent error
+        // mid-task) shows what it produced, with the error recorded alongside.
+        // That is what TIMEOUT_ERROR promises ("the partial result below").
         val conv = Conversation(
             id = UUID.randomUUID().toString(),
             title = entry.title,
             messages = listOf(
                 Message(UUID.randomUUID().toString(), Role.USER, entry.prompt, createdAt = now),
                 Message(UUID.randomUUID().toString(), Role.ASSISTANT,
-                    text = if (error.isBlank()) finalText else "",
+                    text = finalText,
                     steps = stepList,
                     status = if (error.isBlank()) MsgStatus.DONE else MsgStatus.ERROR,
                     error = error, model = "Scheduled task", createdAt = now),
@@ -262,6 +355,22 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
         const val EMPTY_RESULT_ERROR = "The scheduled run produced no answer."
         const val TIMEOUT_ERROR = "The scheduled run reached the 10-minute background limit before it finished, so only the partial result below was saved."
         const val STOPPED_ERROR = "The scheduled run was stopped before it finished."
+        const val NETWORK_ERROR = "No network connection — this schedule only runs when the phone is online."
+
+        /** True when the phone has a network with internet access (P1-8 network constraint). */
+        fun isOnline(ctx: Context): Boolean {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
+            return runCatching {
+                if (Build.VERSION.SDK_INT >= 23) {
+                    val network = cm.activeNetwork ?: return false
+                    val caps = cm.getNetworkCapabilities(network) ?: return false
+                    caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                } else {
+                    @Suppress("DEPRECATION")
+                    cm.activeNetworkInfo?.isConnected == true
+                }
+            }.getOrDefault(false)
+        }
 
         /**
          * Pure outcome rule for one scheduled run (no Android calls, unit-tested
@@ -278,6 +387,10 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
             isOnce: Boolean,
             runAttemptCount: Int,
             maxRetries: Int = MAX_ATTEMPTS - 1,
+            /** P1-8: the run never started — the schedule needs network and the phone is offline. */
+            networkUnavailable: Boolean = false,
+            /** P1-8: retries are used up another way (a split run out of segments) — end the run. */
+            noMoreRetries: Boolean = false,
         ): ScheduledRunDecision {
             // Nothing to run (deleted / switched off between enqueue and fire):
             // terminal failure, nothing to record, nothing to retry.
@@ -288,13 +401,21 @@ class ScheduledRunWorker(appCtx: Context, params: WorkerParameters) : CoroutineW
             if (!hasAttempts)
                 return ScheduledRunDecision(ScheduledRunResult.FAILURE, saveChat = true,
                     markRanStatus = error.ifBlank { NO_KEY_ERROR }, disableOnce = isOnce)
+            // P1-8: offline with a network requirement — retry while attempts
+            // remain (the constraint may clear), then record the failure.
+            if (networkUnavailable) {
+                if (runAttemptCount < maxRetries && !noMoreRetries)
+                    return ScheduledRunDecision(ScheduledRunResult.RETRY, saveChat = false, markRanStatus = null, disableOnce = false)
+                return ScheduledRunDecision(ScheduledRunResult.FAILURE, saveChat = true,
+                    markRanStatus = NETWORK_ERROR, disableOnce = isOnce)
+            }
             val failed = error.isNotBlank() || (!hasAnswer && !hasSteps)
             if (!failed)
                 return ScheduledRunDecision(ScheduledRunResult.SUCCESS, saveChat = true, markRanStatus = "done", disableOnce = isOnce)
             // Transient failure (agent error, timeout, or an empty run): retry
             // while attempts remain, recording nothing yet — the retry is the
             // same run, so a ONCE schedule stays armed until an outcome exists.
-            if (runAttemptCount < maxRetries)
+            if (runAttemptCount < maxRetries && !noMoreRetries)
                 return ScheduledRunDecision(ScheduledRunResult.RETRY, saveChat = false, markRanStatus = null, disableOnce = false)
             // Out of retries: record the failure and end the run.
             return ScheduledRunDecision(ScheduledRunResult.FAILURE, saveChat = true,

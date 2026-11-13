@@ -564,11 +564,21 @@ fun QuotaScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit) {
             Text("API KEYS", style = Type.small.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, fontSize = 13.sp), color = p.text2, modifier = Modifier.padding(start = 30.dp, top = 26.dp, bottom = 10.dp))
             Card {
                 val t = m.totals
-                Row(verticalAlignment = Alignment.Bottom) { Text("Today (all keys)", style = Type.small, color = p.text2, modifier = Modifier.weight(1f)); TagChip(if (m.keys.any { it.day.left.tag == Tag.LIVE }) Tag.LIVE else Tag.COUNTED) }
+                // P1-10: every number carries its source — the chip is the weakest source among the keys feeding the total, never a guess.
+                Row(verticalAlignment = Alignment.Bottom) { Text("Today (all keys)", style = Type.small, color = p.text2, modifier = Modifier.weight(1f)); TagChip(t.usedTag) }
                 if (t.counted > 0) {
                     Text("${num(t.used)} of ${num(t.limit)} used", style = Type.title.copy(fontSize = 22.sp), color = p.text, modifier = Modifier.padding(top = 2.dp))
                     QuotaBar(if (t.limit > 0) t.left / t.limit else null, Modifier.padding(vertical = 10.dp), 8.dp)
                     Text("${num(t.left)} left · ≈ ${num(t.left)} more messages${m.callsPerChat?.let { " · ≈ ${num(Math.floor(t.left / it))} chats" } ?: ""}", style = Type.small, color = p.text)
+                    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("used", style = Type.tiny, color = p.text3); TagChip(t.usedTag)
+                        Text("limit", style = Type.tiny, color = p.text3); TagChip(t.limitTag)
+                        Text("left", style = Type.tiny, color = p.text3); TagChip(t.leftTag)
+                    }
+                    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (t.tokensTag == Tag.COUNTED) "${tokens(t.tokens)} tokens today" else "Tokens not reported by the provider yet", style = Type.small, color = p.text)
+                        TagChip(t.tokensTag)
+                    }
                     Text(when (val r = m.runOut) {
                         is QuotaMath.RunOut.Before -> "At this pace: runs out in ~${QuotaMath.shortDuration(r.ms)}"
                         is QuotaMath.RunOut.LastsPastReset -> "At this pace: lasts past reset${r.resetAt?.let { " (${timeOf(it)})" } ?: ""}"
@@ -576,6 +586,8 @@ fun QuotaScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit) {
                     }, style = Type.small, color = p.text2, modifier = Modifier.padding(top = 4.dp))
                 } else Text(if (m.keys.isEmpty()) "No keys yet" else "Limits not known yet", style = Type.title.copy(fontSize = 20.sp), color = p.text, modifier = Modifier.padding(top = 2.dp))
                 if (t.unknown > 0) Note("${t.counted} key${if (t.counted != 1) "s" else ""} in the total · ${t.unknown} key${if (t.unknown != 1) "s" else ""}: limit not shared by provider", Modifier.padding(top = 6.dp))
+                val sharedGroups = m.keys.filter { it.providerId == "gemini" && it.quotaGroup.isNotBlank() }.groupBy { it.quotaGroup }.filter { it.value.size > 1 }.keys
+                if (sharedGroups.isNotEmpty()) Note("Shared Google-project quota counted once (group${if (sharedGroups.size != 1) "s" else ""}: ${sharedGroups.joinToString(", ")}).", Modifier.padding(top = 6.dp))
             }
             Spacer(Modifier.height(10.dp))
             SettingsGroup {
@@ -584,10 +596,10 @@ fun QuotaScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit) {
                 FreeRow(freeCalls)
                 SettingsRow(Gk.key, "Export / import keys", "Encrypted file with your own password") { nav(Route.KeyBackup) }
             }
-            if (m.keys.any { it.providerId == "gemini" }) Note("Gemini keys from the same Google project share one quota. More quota = keys from different projects.", Modifier.padding(start = 30.dp, end = 30.dp, top = 12.dp))
+            if (m.keys.any { it.providerId == "gemini" }) Note("Gemini keys from the same Google project share one quota — tap a Gemini key and give same-project keys the same group name so the total counts them once. More quota = keys from different projects.", Modifier.padding(start = 30.dp, end = 30.dp, top = 12.dp))
         }
     }
-    detail?.let { k -> KeyDetailSheet(k) { detail = null } }
+    detail?.let { k -> KeyDetailSheet(k, onGroup = { g.connectors.setQuotaGroup(k.connectorId, it) }) { detail = null } }
     rawFor?.let { r ->
         AxionSheet({ rawFor = null }) {
             Text(r.account.label.ifBlank { r.account.email }, style = Type.title, color = p.text, modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp))
@@ -636,7 +648,11 @@ private fun AgyQuotaRow(r: AgyRow, active: String?, probing: Boolean, onRaw: () 
             }
             val reset = b.resetAt?.let { (if ((b.remainingFraction ?: 1.0) <= 0.0001) "back at " else "resets ") + timeOf(it) } ?: ""
             val win = when (b.window) { "5h" -> "5-hour window"; "week" -> "weekly"; else -> "" }
-            if (reset.isNotBlank() || win.isNotBlank()) Text(listOf(win, reset).filter { it.isNotBlank() }.joinToString(" · "), style = Type.tiny, color = p.text3, modifier = Modifier.padding(start = 97.dp, top = 2.dp))
+            // P1-10: every bucket percentage carries its source — agy's own live /usage answer.
+            Row(Modifier.padding(start = 97.dp, top = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(listOf(win, reset).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Live from agy /usage" }, style = Type.tiny, color = p.text3)
+                TagChip(Tag.LIVE)
+            }
         }
     }
 }
@@ -670,7 +686,15 @@ private fun KeyQuotaRow(k: KeyRow, onClick: () -> Unit) {
                 d.resetAt?.let { if (isNotEmpty()) append(" · "); append(if ((d.left.value ?: 1.0) <= 0.0) "back at ${timeOf(it)}" else "resets ${timeOf(it)}") }
                 k.minute?.let { r -> if (r.unit == "tok" && r.limit != null) { if (isNotEmpty()) append(" · "); append("TPM ${tokens(((r.limit - (r.remaining ?: 0.0))).toLong())}/${tokens(r.limit.toLong())}") } }
             }, style = Type.tiny, color = p.text2, maxLines = 1)
+            // P1-10: the per-minute figure comes from the provider's live headers.
+            if (k.minute?.unit == "tok" && k.minute?.limit != null) TagChip(Tag.LIVE)
         }
+        // P1-10 (ME-4): real counted tokens for this key; UNKNOWN when the provider never reported usage — never shown as 0.
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (d.tokens.value != null) "${tokens(d.tokens.value!!.toLong())} tokens today" else "Tokens not reported by the provider yet", style = Type.tiny, color = p.text2)
+            TagChip(d.tokens.tag)
+        }
+        if (k.quotaGroup.isNotBlank()) Text("Shares one quota with group “${k.quotaGroup}”", style = Type.tiny, color = p.text2, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
@@ -694,11 +718,21 @@ private fun FreeRow(calls: Int) {
 }
 
 @Composable
-private fun KeyDetailSheet(k: KeyRow, onDismiss: () -> Unit) {
+private fun KeyDetailSheet(k: KeyRow, onGroup: (String) -> Unit = {}, onDismiss: () -> Unit) {
     val p = P
     AxionSheet(onDismiss) {
         Text("${k.providerName} ${k.keyHint}", style = Type.title, color = p.text, modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp))
         Note(k.note, Modifier.padding(horizontal = 24.dp))
+        if (k.providerId == "gemini") {
+            // P1-10 (ME-3): Gemini keys from the same Google project share one quota — same group name = counted once in the totals.
+            var group by remember(k.connectorId) { mutableStateOf(k.quotaGroup) }
+            Column(Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+                Text("Shared quota group", style = Type.small.copy(fontWeight = FontWeight.Medium), color = p.text)
+                Spacer(Modifier.height(6.dp))
+                Field(group, { group = it; onGroup(it) }, "Same Google project? Same name, e.g. project-a")
+                Text("Keys with the same name share one quota and are counted once. Leave blank when this key is on its own project.", style = Type.tiny, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
         Spacer(Modifier.height(10.dp))
         val rows = if (k.perModel.isNotEmpty()) k.perModel else listOf(k.model to k.day)
         rows.forEach { (model, d) ->
@@ -711,6 +745,11 @@ private fun KeyDetailSheet(k: KeyRow, onDismiss: () -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("used", style = Type.tiny, color = p.text3); TagChip(d.used.tag); Text("limit", style = Type.tiny, color = p.text3); TagChip(d.limit.tag)
                     d.resetAt?.let { Text("resets ${timeOf(it)}", style = Type.tiny, color = p.text2) }
+                }
+                // P1-10 (ME-4): real counted tokens for this model; UNKNOWN when the provider never reported usage.
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("tokens", style = Type.tiny, color = p.text3); TagChip(d.tokens.tag)
+                    Text(if (d.tokens.value != null) "${tokens(d.tokens.value!!.toLong())} today" else "not reported by the provider", style = Type.tiny, color = p.text2)
                 }
             }
         }

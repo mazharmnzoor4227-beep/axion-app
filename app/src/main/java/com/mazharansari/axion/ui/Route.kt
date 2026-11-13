@@ -34,9 +34,13 @@ sealed interface Route {
     // v0.12 — remembered approvals + scheduled tasks
     data object Approvals : Route
     data object Schedules : Route
+    // P1-3 — the user's own server for Turbo tasks (opt-in cloud sandbox)
+    data object Turbo : Route
+    // P1-1 — in-app GitHub coding agent
+    data object GitHub : Route
 }
 
 /** v0.5.2: routes shown with FLAG_SECURE (a key, token or password can be typed or shown on them). */
 object SecureRoutes {
-    val all: Set<Route> = setOf(Route.Connectors, Route.CustomConnector, Route.Skills, Route.KeyBackup, Route.MyServer, Route.Antigravity)
+    val all: Set<Route> = setOf(Route.Connectors, Route.CustomConnector, Route.Skills, Route.KeyBackup, Route.MyServer, Route.Antigravity, Route.Turbo, Route.GitHub)
 }

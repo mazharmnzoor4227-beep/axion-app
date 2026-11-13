@@ -174,6 +174,18 @@ private fun LongTaskChip(on: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** P1-3: the Turbo (server) toggle — same chip family as Research: accent-filled while on. */
+@Composable
+private fun TurboChip(on: Boolean, onClick: () -> Unit) {
+    val p = P; val tap = rememberTap(onClick)
+    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(if (on) p.accent else p.chip).clickable(onClick = tap).padding(start = 12.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        GkIcon(Gk.rocket, null, 17.dp, if (on) p.onAccent else p.text2)
+        Spacer(Modifier.width(6.dp))
+        Text("Turbo", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = if (on) p.onAccent else p.text)
+    }
+}
+
 /**
  * v0.9.4: the 10X tool toggles (Research, Long task) live in their own line ABOVE the composer box,
  * not inside it. Inside the box they pushed the mic and the Send button off the right edge — the
@@ -181,9 +193,10 @@ private fun LongTaskChip(on: Boolean, onClick: () -> Unit) {
  * Rendered by HomeScreen directly above Composer (Ask only).
  */
 @Composable
-fun ToolsRow(researchOn: Boolean, onResearch: () -> Unit, longTaskOn: Boolean, onLongTask: () -> Unit, modifier: Modifier = Modifier) {
+fun ToolsRow(researchOn: Boolean, onResearch: () -> Unit, longTaskOn: Boolean, onLongTask: () -> Unit, turboOn: Boolean = false, onTurbo: () -> Unit = {}, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ResearchChip(researchOn, onResearch)
         LongTaskChip(longTaskOn, onLongTask)
+        TurboChip(turboOn, onTurbo)
     }
 }

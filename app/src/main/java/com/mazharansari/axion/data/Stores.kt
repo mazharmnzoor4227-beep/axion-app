@@ -41,6 +41,10 @@ data class AppSettings(
     val deepResearch: Boolean = false,
     /** v0.12: the composer's Long task toggle — while on, ACTION turns get a far bigger step/tool budget and plan-verify-finish guidance. */
     val longTask: Boolean = false,
+    /** P1-3: the composer's Turbo (server) toggle — while on, shell work for this task runs on the
+     * user's own server (Settings → Turbo) instead of the on-device Linux. Default OFF; the
+     * server setup must also be complete, or the toggle does nothing and the run says so. */
+    val turbo: Boolean = false,
     /** v0.5: the Build first-run "Install developer tools" popup was shown (addendum 2). */
     val buildIntroShown: Boolean = false,
     /** v0.5.3: the user chose "Continue as guest" on the sign-in screen (it then stays away; Settings → Account signs in). */

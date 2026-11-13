@@ -70,8 +70,8 @@ class LiveCallV04Test {
         waitFor { transports.size == 4 && transports[3].listener != null }
         transports[3].listener!!.onOpen()
         waitFor { transports[3].sent.isNotEmpty() }
-        assertTrue(transports[3].sent[0].contains("models/gemini-3.1-flash-live-preview"))
-        assertEquals("gemini-3.1-flash-live-preview", s.currentModel)
+        assertTrue(transports[3].sent[0].contains("models/gemini-3.8-live-extended-thinking"))
+        assertEquals("gemini-3.8-live-extended-thinking", s.currentModel)
 
         transports[3].listener!!.onMessage("""{"setupComplete":{}}""")
         assertTrue(rec.ready.await(2, TimeUnit.SECONDS))

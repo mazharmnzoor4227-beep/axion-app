@@ -69,6 +69,8 @@ class FaultPolicy(
             "browser_open", "browser_search" -> 120_000L
             // v0.11: a research run is minutes of searching + reading by design (its own internal budget stops sooner).
             "deep_research" -> if (args.s("depth")?.trim()?.lowercase() == "standard") 900_000L else 1_800_000L
+            // P1-4: three parallel searches; each is quick, the model planning call is the slow part.
+            "subagent_research" -> 180_000L
             "video_edit" -> 1_700_000L
             "video_probe" -> 120_000L
             "generate_image" -> 150_000L

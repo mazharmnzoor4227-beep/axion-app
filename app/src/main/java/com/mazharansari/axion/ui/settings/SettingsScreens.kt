@@ -3,6 +3,7 @@ package com.mazharansari.axion.ui.settings
 import com.mazharansari.axion.update.UpdateInfo
 import com.mazharansari.axion.update.UpdateRules
 import com.mazharansari.axion.update.UpdateState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.content.Intent
@@ -37,10 +38,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.mazharansari.axion.BuildConfig
 import com.mazharansari.axion.data.AppSettings
+import com.mazharansari.axion.linux.TurboAuth
+import com.mazharansari.axion.linux.TurboSettings
 import com.mazharansari.axion.ui.ChatViewModel
 import com.mazharansari.axion.ui.Route
+import com.mazharansari.axion.ui.build.BRed
 import com.mazharansari.axion.ui.chat.ArtifactCard
 import com.mazharansari.axion.ui.chat.sizeLabel
 import com.mazharansari.axion.ui.components.*
@@ -108,6 +113,7 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
             SettingsRow(Gk.wand, "Customize Axion") { nav(Route.Customize) }
             SettingsRow(Gk.connectors, "Connectors", subtitle = if (keys.isEmpty()) "None" else keys.joinToString(", ") { it.provider.name }.take(40)) { nav(Route.Connectors) }
             SettingsRow(Gk.skills, "Skills", subtitle = "${skills.count { it.enabled }} enabled") { nav(Route.Skills) }
+            SettingsRow(Gk.github, "GitHub", subtitle = vm.g.github.state.collectAsState().value.let { if (it.tokenBlob.isBlank()) "Clone, commit and push from your phone" else "Connected" + it.login.let { l -> if (l.isBlank()) "" else " · @$l" } }) { nav(Route.GitHub) }
             SettingsRow(Gk.brain, "Memory", subtitle = memCount.let { if (it == 0) "What Axion remembers about you" else "$it saved" }) { nav(Route.Memory) }
             SettingsRow(Gk.shield, "Approvals", subtitle = vm.g.approvals.rules.collectAsState().value.size.let { if (it == 0) "Commands Axion may run without asking" else "$it remembered" }) { nav(Route.Approvals) }
             SettingsRow(Gk.clock, "Schedules", subtitle = vm.g.schedules.entries.collectAsState().value.count { it.enabled }.let { if (it == 0) "Tasks Axion runs on a schedule" else "$it active" }) { nav(Route.Schedules) }
@@ -115,6 +121,8 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
             SettingsRow(Gk.globe, "Browser", subtitle = "Axion's own — real pages, forms, screenshots") { nav(Route.Browser) }
             SettingsRow(Gk.terminal, "Terminal", subtitle = "Linux shell — run commands yourself") { nav(Route.Terminal) }
             SettingsRow(Gk.terminal, "Developer tools", subtitle = "Linux · Python, Node, C++, PHP…") { nav(Route.DevTools) }
+            // P1-3 Turbo (server): the user's own server as an opt-in cloud sandbox for long jobs.
+            SettingsRow(Gk.rocket, "Turbo (server)", subtitle = vm.g.cloud.settings.collectAsState().value.let { if (it.enabled && it.host.isNotBlank()) "On · ${it.hostLabel()}" else "Your own server for long builds" }) { nav(Route.Turbo) }
             SettingsRow(Gk.rocket, "Antigravity", subtitle = vm.g.agy.store.collectAsState().value.accounts.size.let { if (it == 0) "Multi-account, auto-switch" else "$it account${if (it > 1) "s" else ""}" }) { nav(Route.Antigravity) }
             SettingsRow(Gk.usage, "Quota", subtitle = "Used, left and reset times") { nav(Route.Quota) }
         }
@@ -208,6 +216,108 @@ private fun Field(label: String, value: String, onChange: (String) -> Unit, plac
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card).padding(horizontal = 16.dp, vertical = 15.dp)) {
             if (value.isEmpty()) Text(placeholder, style = Type.body, color = p.text3)
             BasicTextField(value, onChange, textStyle = Type.body.copy(color = p.text), cursorBrush = SolidColor(p.text), minLines = minLines, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** Same box as [Field], but the text is masked (passwords, passphrases). */
+@Composable
+private fun SecretField(label: String, value: String, onChange: (String) -> Unit, placeholder: String = "", minLines: Int = 1) {
+    val p = P
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = p.text2, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card).padding(horizontal = 16.dp, vertical = 15.dp)) {
+            if (value.isEmpty()) Text(placeholder, style = Type.body, color = p.text3)
+            BasicTextField(value, onChange, textStyle = Type.body.copy(color = p.text), cursorBrush = SolidColor(p.text),
+                visualTransformation = PasswordVisualTransformation(), minLines = minLines, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/**
+ * P1-3 Turbo (server): the user's own server as an opt-in cloud sandbox. OFF by default — the
+ * on-device Linux stays the computer until this is on AND the Turbo chip is tapped for a task.
+ * The password / private key are stored only as KeyVault-encrypted blobs (never plain text);
+ * the server's host key is pinned the first time the user taps "Trust this server" after the
+ * Test button shows its fingerprint. Saved automatically when leaving the screen.
+ */
+@Composable
+fun TurboScreen(vm: ChatViewModel, back: () -> Unit) {
+    val cloud = vm.g.cloud
+    val saved by cloud.settings.collectAsState()
+    var enabled by remember { mutableStateOf(saved.enabled) }
+    var host by remember { mutableStateOf(saved.host) }
+    var port by remember { mutableStateOf(saved.port.toString()) }
+    var username by remember { mutableStateOf(saved.username) }
+    var auth by remember { mutableStateOf(saved.auth) }
+    var remoteWorkspace by remember { mutableStateOf(saved.remoteWorkspace) }
+    var password by remember { mutableStateOf("") }   // blank = keep what is already saved
+    var keyPem by remember { mutableStateOf("") }     // blank = keep what is already saved
+    var passphrase by remember { mutableStateOf("") } // blank = keep what is already saved
+    var result by remember { mutableStateOf("") }
+    var testing by remember { mutableStateOf(false) }
+    var trustFingerprint by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun draft(): TurboSettings = TurboSettings(enabled, host.trim(), port.toIntOrNull() ?: -1, username.trim(), auth,
+        remoteWorkspace.trim().ifBlank { "~/axion-workspace" }, saved.hostKeyFingerprint,
+        passwordBlob = if (auth == TurboAuth.PASSWORD) (if (password.isNotBlank()) "set" else saved.passwordBlob) else saved.passwordBlob,
+        keyBlob = if (auth == TurboAuth.KEY) (if (keyPem.isNotBlank()) "set" else saved.keyBlob) else saved.keyBlob)
+    fun saveEdits() {
+        cloud.store.save(draft().copy(passwordBlob = saved.passwordBlob, keyBlob = saved.keyBlob, passphraseBlob = saved.passphraseBlob))
+        if (password.isNotBlank()) cloud.store.setPassword(password)
+        if (keyPem.isNotBlank()) cloud.store.setKey(keyPem)
+        if (passphrase.isNotBlank()) cloud.store.setPassphrase(passphrase)
+    }
+    DisposableEffect(Unit) { onDispose { saveEdits() } }
+
+    fun test(trust: Boolean) {
+        testing = true; result = ""; trustFingerprint = null
+        scope.launch {
+            saveEdits()
+            val r = runCatching { withContext(Dispatchers.IO) { cloud.testConnection(trust) } }
+            result = r.getOrElse { e ->
+                Regex("SHA256:[A-Za-z0-9+/]+={0,2}").find(e.message.orEmpty())?.value?.let { trustFingerprint = it }
+                e.message ?: "Connection failed"
+            }
+            if (r.isSuccess) trustFingerprint = null
+            testing = false
+        }
+    }
+
+    SettingsPage("Turbo (server)", back) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Text("Your own server does the heavy work: long builds and big jobs run there while the phone stays cool, and the results sync back to the phone workspace. The on-device Linux stays the default — Turbo only runs when this switch is on and you tap the Turbo chip for a task.", style = Type.small, color = P.text2)
+            ToggleRow(Gk.rocket, "Turbo (server)", if (enabled) "On — the Turbo chip can send a task to this server" else "Off — everything runs on the phone", enabled) { enabled = it }
+            Field("Server address", host, { host = it }, "e.g. 130.210.34.84 (no http://, no path)")
+            Field("Port", port, { port = it.filter { c -> c.isDigit() }.take(5) }, "22")
+            Field("Username", username, { username = it }, "e.g. ubuntu")
+            Field("Folder on the server", remoteWorkspace, { remoteWorkspace = it }, "~/axion-workspace")
+            SectionLabel("Sign in")
+            SettingsGroup {
+                SettingsRow(null, "Password", chevron = false, trailing = { Check(auth == TurboAuth.PASSWORD) }) { auth = TurboAuth.PASSWORD }
+                SettingsRow(null, "Private key", chevron = false, trailing = { Check(auth == TurboAuth.KEY) }) { auth = TurboAuth.KEY }
+            }
+            if (auth == TurboAuth.PASSWORD) {
+                SecretField("Server password", password, { password = it }, if (saved.passwordBlob == null) "Password for this server" else "Saved — type to replace it")
+            } else {
+                Field("Private key", keyPem, { keyPem = it }, if (saved.keyBlob == null) "Paste the private key (-----BEGIN OPENSSH PRIVATE KEY----- …)" else "Saved — paste to replace it", minLines = 4)
+                SecretField("Key passphrase (if any)", passphrase, { passphrase = it }, "Leave blank if the key has no passphrase")
+            }
+            val problems = draft().validate()
+            if (problems.isNotEmpty()) problems.forEach { Text(it, style = Type.small, color = BRed) }
+            if (saved.hostKeyFingerprint != null) Text("Trusted server key: ${saved.hostKeyFingerprint}", style = Type.small, color = P.text2)
+            BigButton(if (testing) "Testing…" else "Test connection", enabled = !testing && problems.isEmpty()) { test(false) }
+            if (trustFingerprint != null) {
+                Text("This server's key is new: $trustFingerprint. Check it matches your server (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server), then trust it.", style = Type.small, color = P.text2)
+                BigButton("Trust this server") { test(true) }
+            }
+            if (result.isNotBlank()) Text(result, style = Type.small, color = P.text2)
+            if (saved.passwordBlob != null || saved.keyBlob != null) {
+                Text("Remove saved credentials", style = Type.small.copy(fontWeight = FontWeight.Medium), color = P.text2,
+                    modifier = Modifier.clickable { cloud.store.clearCredentials(); password = ""; keyPem = ""; passphrase = ""; result = "Saved credentials removed." })
+            }
+            Text("Saved automatically.", style = Type.small, color = P.text3)
         }
     }
 }

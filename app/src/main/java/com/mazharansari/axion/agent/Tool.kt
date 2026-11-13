@@ -43,6 +43,12 @@ class ToolContext(
      * where tools must degrade to deterministic behaviour.
      */
     val ask: (suspend (prompt: String) -> String)? = null,
+    /**
+     * P1-3 Turbo (server): the composer toggle for this task. When true AND the user's server is
+     * set up in Settings, run_command / shell_session run on their own server; otherwise the
+     * on-device Linux is used exactly as before.
+     */
+    val turbo: Boolean = false,
     /** Live output for long commands (shown in the open Bash card). Kept LAST: call sites pass it as a trailing lambda. */
     val progress: (String) -> Unit = {},
 )

@@ -51,6 +51,7 @@ class GeminiClient(
                 val src = r.body!!.source()
                 val calls = mutableListOf<ToolCall>()
                 var finish: String? = null
+                var usage: com.mazharansari.axion.quota.TokenUsage? = null
                 var n = 0
                 while (true) {
                     currentCoroutineContext().ensureActive()
@@ -58,6 +59,8 @@ class GeminiClient(
                     if (!line.startsWith("data:")) continue
                     val obj = runCatching { Json.parseToJsonElement(line.substring(5).trim()).jsonObject }.getOrNull() ?: continue
                     obj["error"]?.let { val m = it.toString(); throw LlmException(shortError(m, 0), classifyHttp(0, m)) }
+                    // P1-10 (ME-4): the last chunk carries usageMetadata with the real token counts.
+                    com.mazharansari.axion.quota.LlmUsage.parseGemini(obj)?.let { usage = it }
                     val cand = obj["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
                     cand.str("finishReason")?.let { finish = it }
                     val parts = cand["content"]?.jsonObject?.get("parts")?.jsonArray ?: continue
@@ -80,6 +83,8 @@ class GeminiClient(
                 }
                 if (finish == "SAFETY" || finish == "PROHIBITED_CONTENT") emit(LlmEvent.Text("\n\n_(Gemini stopped this answer for safety.)_"))
                 if (calls.isNotEmpty()) emit(LlmEvent.ToolCalls(calls))
+                // P1-10 (ME-4): real token counts for the Quota screen; absent usage stays UNKNOWN, never 0.
+                usage?.let { com.mazharansari.axion.quota.QuotaHooks.reportUsage(tag, "gemini", model, it) }
                 emit(LlmEvent.Finished(finish))
             }
         } catch (e: IOException) {

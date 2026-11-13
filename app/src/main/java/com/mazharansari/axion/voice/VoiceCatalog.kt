@@ -36,6 +36,11 @@ data class AxVoice(
     /** Device voice name (Kodex) or Edge voice short name (natural). */
     val engineVoice: String = "",
     val female: Boolean = true,
+    /**
+     * P1-11: the Gemini voice this Natural voice falls back to when the Edge route fails (same gender, closest
+     * Gemini style). Blank for non-Natural voices — they have no Edge route to hedge.
+     */
+    val geminiFallback: String = "",
 )
 
 object VoiceCatalog {
@@ -54,14 +59,16 @@ object VoiceCatalog {
     )
 
     val natural = listOf(
-        AxVoice("edge:ava", "Ava", VoiceFamily.NATURAL, "English · multilingual", "Warm, expressive", "en-US-AvaMultilingualNeural", true),
-        AxVoice("edge:andrew", "Andrew", VoiceFamily.NATURAL, "English · multilingual", "Warm, confident", "en-US-AndrewMultilingualNeural", false),
-        AxVoice("edge:emma", "Emma", VoiceFamily.NATURAL, "English · multilingual", "Cheerful, clear", "en-US-EmmaMultilingualNeural", true),
-        AxVoice("edge:brian", "Brian", VoiceFamily.NATURAL, "English · multilingual", "Easy, casual", "en-US-BrianMultilingualNeural", false),
-        AxVoice("edge:swara", "Swara", VoiceFamily.NATURAL, "Hindi · Roman Urdu", "Best for Roman Urdu / Hinglish", "hi-IN-SwaraNeural", true),
-        AxVoice("edge:madhur", "Madhur", VoiceFamily.NATURAL, "Hindi · Roman Urdu", "Best for Roman Urdu / Hinglish", "hi-IN-MadhurNeural", false),
-        AxVoice("edge:uzma", "Uzma", VoiceFamily.NATURAL, "Urdu (Pakistan)", "Urdu script", "ur-PK-UzmaNeural", true),
-        AxVoice("edge:asad", "Asad", VoiceFamily.NATURAL, "Urdu (Pakistan)", "Urdu script", "ur-PK-AsadNeural", false),
+        // P1-11: every Natural voice has a Gemini counterpart (same gender, closest style) so one Microsoft
+        // rotation cannot silence all 8 — see geminiFallbackFor / voiceFallbackChain.
+        AxVoice("edge:ava", "Ava", VoiceFamily.NATURAL, "English · multilingual", "Warm, expressive", "en-US-AvaMultilingualNeural", true, "Kore"),
+        AxVoice("edge:andrew", "Andrew", VoiceFamily.NATURAL, "English · multilingual", "Warm, confident", "en-US-AndrewMultilingualNeural", false, "Puck"),
+        AxVoice("edge:emma", "Emma", VoiceFamily.NATURAL, "English · multilingual", "Cheerful, clear", "en-US-EmmaMultilingualNeural", true, "Zephyr"),
+        AxVoice("edge:brian", "Brian", VoiceFamily.NATURAL, "English · multilingual", "Easy, casual", "en-US-BrianMultilingualNeural", false, "Achird"),
+        AxVoice("edge:swara", "Swara", VoiceFamily.NATURAL, "Hindi · Roman Urdu", "Best for Roman Urdu / Hinglish", "hi-IN-SwaraNeural", true, "Sulafat"),
+        AxVoice("edge:madhur", "Madhur", VoiceFamily.NATURAL, "Hindi · Roman Urdu", "Best for Roman Urdu / Hinglish", "hi-IN-MadhurNeural", false, "Charon"),
+        AxVoice("edge:uzma", "Uzma", VoiceFamily.NATURAL, "Urdu (Pakistan)", "Urdu script", "ur-PK-UzmaNeural", true, "Aoede"),
+        AxVoice("edge:asad", "Asad", VoiceFamily.NATURAL, "Urdu (Pakistan)", "Urdu script", "ur-PK-AsadNeural", false, "Charon"),
     )
 
     /** Gemini Live voices (Google's names + Google's one-word styles). Samples: voice_samples/geminilive_*.mp3. */
@@ -118,6 +125,24 @@ object VoiceCatalog {
     /** The Gemini Live voice a live call uses when the picked voice isn't a Gemini one (same gender). */
     fun geminiTwin(voice: AxVoice): AxVoice =
         if (voice.family == VoiceFamily.GEMINI) voice else gemini.first { it.engineVoice == (if (voice.female) "Kore" else "Puck") }
+
+    /** P1-11: the Gemini counterpart of a Natural voice — the voice read-aloud falls back to when Edge fails. Null for non-Natural voices. */
+    fun geminiFallbackFor(voice: AxVoice): AxVoice? =
+        if (voice.family != VoiceFamily.NATURAL || voice.geminiFallback.isBlank()) null
+        else gemini.firstOrNull { it.engineVoice == voice.geminiFallback }
+
+    /**
+     * P1-11: the read-aloud fallback chain for [voice], in try order. Edge stays primary; a Natural voice falls
+     * back to its Gemini counterpart when a Gemini key is available (it reads any script, so Smart-Urdu stand-ins
+     * need no separate mapping); everything ends on the phone's Rounded voice so a message is never left silent.
+     */
+    fun voiceFallbackChain(voice: AxVoice, hasGeminiKeys: Boolean): List<AxVoice> {
+        val chain = mutableListOf(voice)
+        if (hasGeminiKeys) geminiFallbackFor(voice)?.let { chain += it }
+        val rounded = kodex.first()
+        if (chain.last() != rounded) chain += rounded
+        return chain
+    }
 
     /** The Edge voice that should read [text] when [voice] is the active natural voice. */
     fun edgeVoiceFor(voice: AxVoice, text: String, smartUrdu: Boolean): String {

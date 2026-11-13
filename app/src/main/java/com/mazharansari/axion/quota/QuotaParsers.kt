@@ -127,6 +127,44 @@ object OpenRouterKey {
     }
 }
 
+/** P1-10 (ME-4): real token counts, parsed from the providers' own responses.
+ * OpenAI-compatible chat completions return `usage: {prompt_tokens, completion_tokens, total_tokens}` — in the
+ * single-JSON answer, and in the last SSE chunk when the request asked for it (`stream_options.include_usage`).
+ * Gemini returns `usageMetadata: {promptTokenCount, candidatesTokenCount, totalTokenCount}` in the last
+ * streamGenerateContent chunk (and in the single-JSON answer). Both are counted, never estimated: when neither
+ * object is present the result is null and the Quota screen says so (UNKNOWN), it never shows 0 as a count. */
+data class TokenUsage(val prompt: Long, val completion: Long) { val total: Long get() = prompt + completion }
+
+object LlmUsage {
+    private fun JsonObject.longNum(vararg keys: String): Long? {
+        for (k in keys) {
+            val p = this[k] as? JsonPrimitive ?: continue
+            p.longOrNull?.let { return it }
+            p.contentOrNull?.toLongOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    fun parseOpenAi(obj: JsonObject): TokenUsage? {
+        val u = obj["usage"]?.jsonObject ?: return null
+        val prompt = u.longNum("prompt_tokens") ?: 0L
+        val completion = u.longNum("completion_tokens") ?: 0L
+        val total = u.longNum("total_tokens") ?: 0L
+        if (prompt == 0L && completion == 0L && total == 0L) return null
+        // Some gateways send only total_tokens: attribute it all to the prompt rather than inventing a split.
+        return if (prompt == 0L && completion == 0L) TokenUsage(total, 0L) else TokenUsage(prompt, completion)
+    }
+
+    fun parseGemini(obj: JsonObject): TokenUsage? {
+        val u = obj["usageMetadata"]?.jsonObject ?: return null
+        val prompt = u.longNum("promptTokenCount") ?: 0L
+        val completion = u.longNum("candidatesTokenCount") ?: 0L
+        val total = u.longNum("totalTokenCount") ?: 0L
+        if (prompt == 0L && completion == 0L && total == 0L) return null
+        return if (prompt == 0L && completion == 0L) TokenUsage(total, 0L) else TokenUsage(prompt, completion)
+    }
+}
+
 /**
  * agy `/usage` (alias /quota) parser. The real shape needs a signed-in account and has NOT been seen yet (spec §3.2), so this walks
  * the JSON generically: any object carrying remaining_percentage | remaining_fraction | used_percentage is a bucket. Falls back to

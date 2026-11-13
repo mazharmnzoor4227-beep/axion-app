@@ -27,10 +27,16 @@ import org.json.JSONObject
  */
 object LiveCallProtocol {
 
-    /** Current default Live model (stable, native audio, free tier per Google's pricing page). */
+    /** Current default Live model (stable, native audio, free tier per Google's pricing page).
+     * P1-11: verified 13 Nov 2026 against Google's AI Studio models page — gemini-3.8-live is listed as the
+     * default Live API model for low-latency voice agents (New + Stable). */
     const val MODEL = "gemini-3.8-live"
-    /** v0.4: the next Live native-audio models to try if Google rejects [MODEL] (the bidi list read from Google on 1 Nov 2026). */
-    val FALLBACK_MODELS = listOf("gemini-3.1-flash-live-preview", "gemini-2.5-flash-native-audio-latest")
+    /** v0.4: the next Live native-audio models to try if Google rejects [MODEL].
+     * P1-11: gemini-3.1-flash-live-preview was REMOVED — Google's deprecations page retires it 17 Nov 2026
+     * (replacement: gemini-3.8-live). gemini-3.8-live-extended-thinking is listed Stable on the models page.
+     * gemini-2.5-flash-native-audio-latest is UNVERIFIED in the lists checked 13 Nov 2026 (its dated preview
+     * sibling retires 17 Nov 2026) — re-check it against the live models list before relying on it. */
+    val FALLBACK_MODELS = listOf("gemini-3.8-live-extended-thinking", "gemini-2.5-flash-native-audio-latest")
 
     const val ENDPOINT =
         "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
@@ -59,6 +65,7 @@ object LiveCallProtocol {
      * ready falls back quietly to the plain models below — same as 0.5.2.
      */
     const val AFFECTIVE = "affective:"
+    /** P1-11: UNVERIFIED in the lists checked 13 Nov 2026 (tryAffective is OFF; re-check before enabling). */
     val AFFECTIVE_MODELS = listOf("gemini-2.5-flash-native-audio-latest", "gemini-2.5-flash-native-audio-preview-09-2025")
     fun isAffective(entry: String) = entry.startsWith(AFFECTIVE)
     fun modelOf(entry: String) = entry.removePrefix(AFFECTIVE)

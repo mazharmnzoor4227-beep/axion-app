@@ -40,6 +40,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.mazharansari.axion.build.*
 import com.mazharansari.axion.data.Project
 import com.mazharansari.axion.ui.ChatViewModel
@@ -318,7 +321,7 @@ private fun PreviewTab(vm: ChatViewModel, project: Project, onPublish: () -> Uni
             Spacer(Modifier.height(14.dp))
             PublishCard(vm, project, jobs["${project.id}:deploy"], onPublish)
         } else {
-            ApkCard(vm, project, jobs["${project.id}:apk"])
+            ApkCard(vm, project, jobs["${project.id}:apk"], jobs["${project.id}:apk-release"])
         }
         Spacer(Modifier.height(40.dp))
     }
@@ -362,9 +365,31 @@ private fun PublishCard(vm: ChatViewModel, project: Project, job: JobState?, onP
 }
 
 @Composable
-private fun ApkCard(vm: ChatViewModel, project: Project, job: JobState?) {
+private fun ApkCard(vm: ChatViewModel, project: Project, job: JobState?, releaseJob: JobState? = null) {
     val p = P; val g = vm.g
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val ready = g.build.apkReady()
+    // P1-9 release form: the keystore file (picked), alias and passwords. Passwords live only
+    // in this form's state until the build starts, then only in the build request's CharArrays
+    // (wiped when the build ends) — they are asked again for every release build.
+    var releaseForm by remember { mutableStateOf(false) }
+    var keystoreFile by remember { mutableStateOf<File?>(null) }
+    var keystoreName by remember { mutableStateOf("") }
+    var alias by remember { mutableStateOf("") }
+    var storePass by remember { mutableStateOf("") }
+    var keyPass by remember { mutableStateOf("") }
+    val pickKeystore = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val dest = File(ctx.cacheDir, "release-keystore-${System.nanoTime()}.keystore")
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { ctx.contentResolver.openInputStream(uri)?.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }; dest.isFile && dest.length() > 0 }.getOrDefault(false)
+            }
+            if (ok) { keystoreFile = dest; keystoreName = uri.lastPathSegment ?: dest.name }
+            else { vm.toast = "Could not read that keystore file"; dest.delete() }
+        }
+    }
     Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(p.card).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             GkIcon(Gk.phone, null, 20.dp, p.text); Spacer(Modifier.width(10.dp))
@@ -393,15 +418,67 @@ private fun ApkCard(vm: ChatViewModel, project: Project, job: JobState?) {
             else -> Note("Builds a debug APK of this project with Gradle inside Linux, then Android's installer opens.", Modifier.padding(top = 6.dp))
         }
         Spacer(Modifier.height(12.dp))
-        val apk = (job as? JobState.Done)?.file ?: project.lastApk
+        val apk = (releaseJob as? JobState.Done)?.file ?: (job as? JobState.Done)?.file ?: project.lastApk
+        val busy = job is JobState.Running || releaseJob is JobState.Running
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            BigButton(if (job is JobState.Running) "Building…" else "Build APK", enabled = job !is JobState.Running, modifier = Modifier.weight(1f)) { g.build.buildApk(project) }
-            if (apk != null && File(apk).isFile && job !is JobState.Running) {
+            BigButton(if (job is JobState.Running) "Building…" else "Build APK", enabled = !busy, modifier = Modifier.weight(1f)) { g.build.buildApk(project) }
+            if (apk != null && File(apk).isFile && !busy) {
                 Box(Modifier.weight(1f)) { BigButton("Install") { runCatching { g.build.installApk(File(apk)) }.onFailure { vm.toast = it.message } } }
             }
         }
-        if (apk != null && File(apk).isFile && job !is JobState.Running) Text("Share APK", style = Type.small.copy(fontWeight = FontWeight.Medium), color = p.text2,
+        if (apk != null && File(apk).isFile && !busy) Text("Share APK", style = Type.small.copy(fontWeight = FontWeight.Medium), color = p.text2,
             modifier = Modifier.padding(top = 12.dp).clickable { runCatching { g.build.shareFile(File(apk), "application/vnd.android.package-archive") } })
+        // ── P1-9: release APK signed with the user's own keystore ──────────────────────────
+        Spacer(Modifier.height(16.dp))
+        Text("Release APK", style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), color = p.text)
+        Note("Signed with your own keystore, for sharing outside the Play Store. The keystore and its passwords are asked every time and never stored; the keystore is never copied into the project or the APK.", Modifier.padding(top = 6.dp))
+        when (releaseJob) {
+            is JobState.Running -> {
+                Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = p.text, strokeWidth = 2.dp); Spacer(Modifier.width(10.dp))
+                    Text("Gradle is signing the release build…", style = Type.small, color = p.text2)
+                }
+                LogBox(releaseJob.lines)
+            }
+            is JobState.Failed -> { Text(releaseJob.message, style = Type.small, color = BRed, modifier = Modifier.padding(top = 8.dp)); LogBox(releaseJob.lines) }
+            is JobState.Done -> Row(Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (p.isDark) Color(0xFF15261A) else Color(0xFFE6F6EA)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(BGreen)); Spacer(Modifier.width(8.dp))
+                Text(releaseJob.result, style = Type.small.copy(fontWeight = FontWeight.Medium), color = p.text, modifier = Modifier.weight(1f))
+            }
+            else -> {}
+        }
+        Spacer(Modifier.height(12.dp))
+        if (releaseForm) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                BigButtonGhost(if (keystoreName.isBlank()) "Pick keystore file (.keystore / .jks)" else keystoreName) { pickKeystore.launch(arrayOf("*/*")) }
+                ReleaseField("Key alias", alias, { alias = it })
+                ReleaseField("Keystore password", storePass, { storePass = it }, secret = true)
+                ReleaseField("Key password", keyPass, { keyPass = it }, secret = true)
+                BigButton("Build release APK", enabled = !busy && keystoreFile != null && alias.isNotBlank() && storePass.isNotEmpty() && keyPass.isNotEmpty()) {
+                    val file = keystoreFile ?: return@BigButton
+                    val req = ReleaseSigningRequest(file, alias.trim(), storePass.toCharArray(), keyPass.toCharArray())
+                    storePass = ""; keyPass = ""
+                    g.build.buildReleaseApk(project, req)
+                }
+            }
+        } else {
+            BigButton("Build release APK", enabled = !busy) { releaseForm = true }
+        }
+    }
+}
+
+/** One labelled field for the release-signing form (passwords masked). */
+@Composable
+private fun ReleaseField(label: String, value: String, onChange: (String) -> Unit, secret: Boolean = false) {
+    val p = P
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, style = Type.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = p.text2, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).border(1.dp, p.border, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+            if (value.isEmpty()) Text(if (secret) "••••••••" else label, style = Type.body, color = p.text3)
+            BasicTextField(value, onChange, textStyle = Type.body.copy(color = p.text), cursorBrush = SolidColor(p.text),
+                visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+                singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
     }
 }
 

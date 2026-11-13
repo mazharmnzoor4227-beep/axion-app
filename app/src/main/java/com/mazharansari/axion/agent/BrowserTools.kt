@@ -171,3 +171,64 @@ class BrowserScreenshotTool : Tool {
         )
     } catch (e: Throwable) { ToolOutput("Browser error: ${e.message}", isError = true) }
 }
+
+class BrowserTabsTool : Tool {
+    override val spec = ToolSpec(
+        "browser_tabs",
+        "Manage the browser's tabs (P1-7). Each tab keeps its own page and history; switching tabs restores that tab's page. Actions: 'list' (all tabs, the active one marked), 'new' (open a new blank tab), 'switch' (go to a tab by its number), 'close' (close a tab by its number). The tab number is its position in the list, starting at 1.",
+        schema {
+            str("action", "'list', 'new', 'switch' or 'close'")
+            int("tab", "Tab number from browser_tabs list (needed for 'switch' and 'close')", required = false)
+        },
+    )
+    override fun label(args: JsonObject) = StepLabel(StepKind.BROWSE, "Tabs", args.s("action").orEmpty())
+    override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput = try {
+        val b = browser()
+        val tabs = b.tabs.value
+        fun listText(): String = tabs.mapIndexed { i, t ->
+            "${i + 1}. ${if (t.id == b.activeTabId.value) "[active] " else ""}${t.displayName()} — ${t.url.ifBlank { "(blank)" }}"
+        }.joinToString("\n")
+        when (args.s("action")?.trim()?.lowercase()) {
+            "list" -> ToolOutput("Browser tabs (${tabs.size}):\n${listText()}", doneTitle = "${tabs.size} tabs")
+            "new" -> {
+                if (!b.newTab()) ToolOutput("Maximum 10 tabs are open — close one first.", isError = true)
+                else ToolOutput("Opened a new blank tab.\n${listText()}", doneTitle = "New tab")
+            }
+            "switch" -> {
+                val n = args.i("tab") ?: return ToolOutput("Give the tab number from browser_tabs list.", isError = true)
+                val tab = tabs.getOrNull(n - 1) ?: return ToolOutput("There is no tab $n.", isError = true)
+                if (!b.switchTab(tab.id)) ToolOutput("Could not switch to tab $n.", isError = true)
+                else ToolOutput("Switched to tab $n: ${tab.displayName()} — ${tab.url.ifBlank { "(blank)" }}", doneTitle = "Switched tab")
+            }
+            "close" -> {
+                val n = args.i("tab") ?: return ToolOutput("Give the tab number from browser_tabs list.", isError = true)
+                val tab = tabs.getOrNull(n - 1) ?: return ToolOutput("There is no tab $n.", isError = true)
+                if (!b.closeTab(tab.id)) ToolOutput("Could not close tab $n.", isError = true)
+                else ToolOutput("Closed tab $n.\n${listText()}", doneTitle = "Tab closed")
+            }
+            else -> ToolOutput("Action must be 'list', 'new', 'switch' or 'close'.", isError = true)
+        }
+    } catch (e: Throwable) { ToolOutput("Browser error: ${e.message}", isError = true) }
+}
+
+class BrowserDownloadsTool : Tool {
+    override val spec = ToolSpec(
+        "browser_downloads",
+        "List the browser's downloads (P1-7). Files save into the Downloads/Axion folder on the phone, with progress while they download. The user opens them from the Browser screen.",
+        schema { },
+    )
+    override fun label(args: JsonObject) = StepLabel(StepKind.BROWSE, "Downloads", "")
+    override suspend fun run(args: JsonObject, ctx: ToolContext): ToolOutput = try {
+        val list = browser().downloads.value
+        if (list.isEmpty()) return ToolOutput("No downloads yet. When a page offers a file, the browser saves it into Downloads/Axion.")
+        val out = list.joinToString("\n") { d ->
+            "- ${d.fileName}: " + when (d.status) {
+                com.mazharansari.axion.browser.DownloadStatus.DOWNLOADING ->
+                    if (d.progressPercent >= 0) "downloading, ${d.progressPercent}%" else "downloading"
+                com.mazharansari.axion.browser.DownloadStatus.COMPLETE -> "complete, saved in Downloads/Axion"
+                com.mazharansari.axion.browser.DownloadStatus.FAILED -> "failed"
+            }
+        }
+        ToolOutput("Downloads (${list.size}):\n$out", doneTitle = "${list.size} downloads")
+    } catch (e: Throwable) { ToolOutput("Browser error: ${e.message}", isError = true) }
+}
