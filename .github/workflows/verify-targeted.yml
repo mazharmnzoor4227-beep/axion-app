@@ -4,11 +4,14 @@
 # per-class timeout so a hanging class is named instead of stalling the whole run:
 #  - EnglishUiTest + V052SpeedBugTest: the two failures outside the known legacy set
 #  - the 11 classes the full run never reached
+#  - P0 roadmap tests (axion-roadmap-p0): the new/changed unit tests from the audit roadmap
 # Run this on BOTH the fix branch and the release-0.9.3 baseline and compare.
+# Honest gates (P0-13): no `|| true` hides a failure. Every failing class is recorded
+# in the job summary and fails the job at the end (after all classes have run).
 name: Verify Targeted (v0.9.4)
 on:
   push:
-    branches: [axion-v094-composer-fix, axion-baseline-test]
+    branches: [axion-v094-composer-fix, axion-baseline-test, axion-roadmap-p0]
   workflow_dispatch:
 jobs:
   test:
@@ -28,16 +31,27 @@ jobs:
       - name: Disputed failures
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest --no-daemon --stacktrace --tests "com.mazharansari.axion.EnglishUiTest" --tests "com.mazharansari.axion.V052SpeedBugTest" || true
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace --tests "com.mazharansari.axion.EnglishUiTest" --tests "com.mazharansari.axion.V052SpeedBugTest" || { echo "FAILED: Disputed failures (EnglishUiTest / V052SpeedBugTest)" >> $GITHUB_STEP_SUMMARY; echo "AXION_CI_FAILED=1" >> $GITHUB_ENV; }
       - name: Legacy composer UI classes (V03 is the composer area this fix touches)
         run: |
-          ./gradlew testDebugUnitTest --no-daemon --stacktrace --tests "com.mazharansari.axion.V03ScreensTest" --tests "com.mazharansari.axion.V053AuthStorageTest" || true
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace --tests "com.mazharansari.axion.V03ScreensTest" --tests "com.mazharansari.axion.V053AuthStorageTest" || { echo "FAILED: Legacy composer UI classes (V03ScreensTest / V053AuthStorageTest)" >> $GITHUB_STEP_SUMMARY; echo "AXION_CI_FAILED=1" >> $GITHUB_ENV; }
       - name: Unrun classes, one by one
         run: |
           for c in ChangeGateTest CommandStatusTest FaultToleranceTest HistoryCompressionTest PlanningTest V05LogicTest V05ScreensTest V06ScreensTest VideoCommandTest VoiceLogicTest VoiceSelectionTest; do
             echo "===== CLASS $c ====="
-            timeout 480 ./gradlew testDebugUnitTest --no-daemon --tests "com.mazharansari.axion.$c" || echo "EXIT $? for $c"
+            timeout 480 ./gradlew testDebugUnitTest --no-daemon --tests "com.mazharansari.axion.$c" || { echo "FAILED: $c (exit $?)" >> $GITHUB_STEP_SUMMARY; echo "AXION_CI_FAILED=1" >> $GITHUB_ENV; }
           done
+      - name: P0 roadmap tests, one by one
+        run: |
+          for c in ProjectVerifierTest P0RoadmapTest P0RoadmapVmTest TarExtractSecurityTest ScheduleAnchorTest ScheduledRunDecisionTest ApprovalGateTest SecretScannerTest AppUpdateTest ToolsLibraryTest; do
+            echo "===== CLASS $c ====="
+            timeout 480 ./gradlew testDebugUnitTest --no-daemon --tests "com.mazharansari.axion.$c" || { echo "FAILED: $c (exit $?)" >> $GITHUB_STEP_SUMMARY; echo "AXION_CI_FAILED=1" >> $GITHUB_ENV; }
+          done
+      - name: Fail job if any class failed
+        if: always()
+        run: |
+          if [ "$AXION_CI_FAILED" = "1" ]; then echo "One or more test classes failed (see summary above)." >> $GITHUB_STEP_SUMMARY; exit 1; fi
+          echo "All test classes passed." >> $GITHUB_STEP_SUMMARY
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

@@ -92,6 +92,11 @@ class Agent(
 - Do not answer a factual question from your own memory alone while this mode is on.
 - Pure conversation — greetings, opinions, thanks, and follow-ups about a report already given — needs no new research."""
 
+        /** P0-6 (HI-4): Research mode is on but the Deep research tool group is OFF, so deep_research was filtered out. Never a silent normal chat: the model must say so instead of answering from memory. */
+        const val RESEARCH_OFF_NOTE = """RESEARCH MODE was switched on in the composer, but the Deep research tool group is OFF (Settings → Tools library), so deep_research is not available in this run.
+- If this turn needs facts or research, do NOT answer it as a normal chat from memory, and do NOT work around the switched-off tool with other tools: reply briefly that Deep research is switched off, and that the user can turn it back on in Settings → Tools library (tapping the Research toggle again also turns it back on).
+- Pure conversation — greetings, opinions, thanks, and follow-ups about a report already given — needs no research: answer it normally."""
+
         /** v0.12: Long task mode — the run is a project, not a quick favour. */
         const val LONG_TASK_GUIDANCE = """LONG TASK MODE is ON (the user switched it on in the composer):
 - Treat this as a long task: set a plan first (plan_set) with every step, then work through it step by step.
@@ -144,10 +149,16 @@ class Agent(
         // the learning guidance is added whenever this turn actually has the memory/skill tools.
         val memBlock = memory?.promptBlock().orEmpty()
         val learnBlock = if (memory != null && tools.any { it.spec.name == "memory_add" || it.spec.name == "skill_create" }) "\n\n" + LEARNING_GUIDANCE else ""
-        val researchBlock = if (researchMode && tools.any { it.spec.name == "deep_research" }) "\n\n" + RESEARCH_GUIDANCE else ""
+        // P0-6 (HI-4): the composer Research toggle on its own is not enough — if the Deep research
+        // tool group is off, deep_research was filtered out above and RESEARCH_GUIDANCE must not
+        // be added; instead the model is told the group is off, so the run warns instead of
+        // silently answering as a normal chat.
+        val researchAvailable = tools.any { it.spec.name == "deep_research" }
+        val researchBlock = if (researchMode && researchAvailable) "\n\n" + RESEARCH_GUIDANCE else ""
+        val researchOffBlock = if (researchMode && !researchAvailable) "\n\n" + RESEARCH_OFF_NOTE else ""
         val longTaskBlock = if (longTask && intent == Intent.ACTION) "\n\n" + LONG_TASK_GUIDANCE else ""
         val sys = systemPrompt(profile, tools, intent) + memBlock + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
-            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock + longTaskBlock
+            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock + researchOffBlock + longTaskBlock
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user

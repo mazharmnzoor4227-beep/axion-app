@@ -90,7 +90,7 @@ class V03ScreensTest {
             compose.onNodeWithContentDescription("Menu").performClick()
             compose.onNodeWithText("Connectors").performClick(); compose.waitForIdle(); Thread.sleep(300)
             shot("v3_connectors_logos")
-            compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasText("Anthropic")); compose.waitForIdle()
+            compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasText("xAI Grok")); compose.waitForIdle()
             shot("v3_connectors_logos_2")
         }
     }

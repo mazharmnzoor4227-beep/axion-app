@@ -21,6 +21,21 @@ class ProjectVerifier(
     private val installed: (String) -> Boolean,
     private val guestPath: (Project) -> String,
 ) : BuildVerifier {
+    companion object {
+        /**
+         * The exact guest-shell command the build check runs (CR-1 / P0-1).
+         * `set -o pipefail` is the whole fix: `npm run build` is piped through `tail`, and without
+         * pipefail the pipeline's exit code is tail's — always 0 — so a failing build was reported
+         * DONE and never added to the problems list. With pipefail the shell reports npm's own
+         * non-zero code, `done(s, code == 0, …)` marks the step ERROR and the failure lands in
+         * problems. `set` comes first so a failed `cd` still aborts the build via `&&`.
+         */
+        fun buildCheckCommand(guest: String, needInstall: Boolean): String {
+            val cmd = (if (needInstall) "npm install --no-fund --no-audit && " else "") + "npm run build"
+            return "set -o pipefail; cd '$guest' && $cmd 2>&1 | tail -n 60"
+        }
+    }
+
     override suspend fun verify(project: Project, folder: File, onStep: (Step) -> Unit): BuildVerifier.Report = coroutineScope {
         val problems = java.util.Collections.synchronizedList(ArrayList<String>())
         val notes = java.util.Collections.synchronizedList(ArrayList<String>())
@@ -37,7 +52,7 @@ class ProjectVerifier(
             val needInstall = !File(folder, "node_modules").isDirectory
             val cmd = (if (needInstall) "npm install --no-fund --no-audit && " else "") + "npm run build"
             val s = step("build", StepKind.COMMAND, "Bash", cmd)
-            val (code, out) = linux!!.run("cd '$guest' && $cmd 2>&1 | tail -n 60", timeoutMs = 15 * 60_000L, guestCwd = guest)
+            val (code, out) = linux!!.run(buildCheckCommand(guest, needInstall), timeoutMs = 15 * 60_000L, guestCwd = guest)
             done(s, code == 0, out)
             if (code != 0) problems += "`$cmd` failed:\n" + out.lines().filter { it.isNotBlank() }.takeLast(25).joinToString("\n")
         }

@@ -22,7 +22,6 @@ object BrandLogos {
         "together" to R.drawable.brand_together,
         "deepseek" to R.drawable.brand_deepseek,
         "openai" to R.drawable.brand_openai,
-        "anthropic" to R.drawable.brand_anthropic,
         "github" to R.drawable.brand_github,
         "github-models" to R.drawable.brand_github,
         "antigravity" to R.drawable.brand_antigravity,
@@ -34,7 +33,7 @@ object BrandLogos {
         "hf" to "huggingface", "hugging-face" to "huggingface", "hugging_face" to "huggingface",
         "github_models" to "github-models", "githubmodels" to "github-models",
         "together-ai" to "together", "togetherai" to "together",
-        "claude" to "anthropic", "nvidia-nim" to "nvidia", "nim" to "nvidia",
+        "nvidia-nim" to "nvidia", "nim" to "nvidia",
         "google-antigravity" to "antigravity", "agy" to "antigravity",
     )
 

@@ -22,7 +22,7 @@ class AxionApp : Application() {
         com.mazharansari.axion.browser.BrowserHub.graph = graph
         com.mazharansari.axion.local.LocalEngine.libDir = applicationInfo.nativeLibraryDir.orEmpty()   // null under Robolectric
         Thread { runCatching { graph.quota } }.start()   // opens usage.db, restores key cool-downs, hooks rate-limit headers
-        Thread { runCatching { com.mazharansari.axion.work.ScheduleEngine.armAll(this, graph.schedules) } }.start()   // v0.12: re-arm schedules
+        Thread { runCatching { com.mazharansari.axion.work.ScheduleEngine.armAll(this, graph.schedules) } }.start()   // v0.12: re-arm schedules (P0-7: armAll never cancels existing work — KEEP only)
         // v0.5.2 security: the scanner knows the user's own keys/tokens (so even shapeless tokens are caught), and any
         // Antigravity sign-in files left readable (an older version, a run cut off by a crash) are encrypted again.
         com.mazharansari.axion.security.SecretScanner.known = { graph.knownSecrets() }

@@ -6,7 +6,8 @@ import java.io.File
  * v0.5.2: finds API keys and tokens in text and in project files.
  *
  * Two checks:
- *  1. well-known key shapes (OpenAI/OpenRouter/Anthropic sk-…, Google AIza…, Groq gsk_…, GitHub ghp_/github_pat_…, Hugging Face hf_…,
+ *  1. well-known key shapes (OpenAI/OpenRouter/Anthropic sk-…, Google AIza… and the new Gemini AQ.… auth keys,
+ *     Groq gsk_…, Together tgp_…, GitHub ghp_/github_pat_…, Hugging Face hf_…,
  *     xAI, NVIDIA, Cerebras, Netlify, Slack, AWS, Google OAuth tokens, private-key blocks);
  *  2. the user's OWN saved secrets, matched literally — this catches tokens with no fixed shape (Vercel, Cloudflare,
  *     Mistral, a My-server key).
@@ -22,6 +23,10 @@ object SecretScanner {
         Pattern("OpenAI-style key", Regex("""\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_\-]{24,}""")),
         Pattern("sk_ API key", Regex("""\bsk_[a-f0-9]{40,}""")),
         Pattern("Google API key", Regex("""AIza[0-9A-Za-z_\-]{35}""")),
+        // P0-14 (ME-2): since May 2026 Google AI Studio issues Gemini auth keys as "AQ." + 40–60
+        // base64url chars (not AIza…); Together AI project keys are "tgp_v1_" + 43 base64url chars.
+        Pattern("Gemini AQ. key", Regex("""\bAQ\.[A-Za-z0-9_\-]{40,}""")),
+        Pattern("Together key", Regex("""\btgp_[A-Za-z0-9_\-]{20,}""")),
         Pattern("Google OAuth token", Regex("""\bya29\.[0-9A-Za-z_\-]{20,}""")),
         Pattern("Google refresh token", Regex("""\b1//0[0-9A-Za-z_\-]{30,}""")),
         Pattern("Groq key", Regex("""\bgsk_[A-Za-z0-9]{20,}""")),
@@ -43,14 +48,18 @@ object SecretScanner {
     data class Hit(val kind: String, val start: Int, val end: Int)
 
     fun find(text: String, known: Collection<String> = safeKnown()): List<Hit> {
-        if (text.length < 16) return emptyList()
+        // P0-14 (ME-2): the old 16-char floor let short texts (e.g. a pasted key on its own) through
+        // unscrubbed. Patterns need 20+ chars anyway; only a literal known secret can hit below that.
+        if (text.length < 8) return emptyList()
         val hits = ArrayList<Hit>()
         for (k in known) {
-            if (k.length < 12) continue   // too short to match without false alarms
+            if (k.length < 8) continue   // P0-14: short secrets (>= 8 chars) are literal-matched too
             var i = text.indexOf(k)
             while (i >= 0) { hits += Hit("your saved key", i, i + k.length); i = text.indexOf(k, i + k.length) }
         }
-        for (p in patterns) for (m in p.regex.findAll(text)) if (p.kind == "Private key" || looksRandom(m.value)) hits += Hit(p.kind, m.range.first, m.range.last + 1)
+        // AQ. and tgp_ prefixes belong to no ordinary text, so they match on shape alone —
+        // the looksRandom gate (digits/letters mix) must not let a real key through.
+        for (p in patterns) for (m in p.regex.findAll(text)) if (p.kind == "Private key" || p.kind == "Gemini AQ. key" || p.kind == "Together key" || looksRandom(m.value)) hits += Hit(p.kind, m.range.first, m.range.last + 1)
         // merge overlaps, keep the earliest kind
         return hits.sortedBy { it.start }.fold(ArrayList<Hit>()) { acc, h ->
             val last = acc.lastOrNull()
@@ -70,7 +79,7 @@ object SecretScanner {
 
     /** "gsk_abc…wxyz" → "gsk_••••wxyz". Keeps a short readable prefix and the last 4 so the user knows which key it was. */
     fun mask(secret: String): String {
-        val prefix = Regex("""^(sk-ant-|sk-or-v1-|sk-proj-|sk-|sk_|AIza|gsk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|hf_|xai-|nvapi-|csk-|nfp_|ya29\.|1//|AKIA|xox[a-z]-)""").find(secret)?.value.orEmpty()
+        val prefix = Regex("""^(sk-ant-|sk-or-v1-|sk-proj-|sk-|sk_|AIza|AQ\.|gsk_|tgp_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|hf_|xai-|nvapi-|csk-|nfp_|ya29\.|1//|AKIA|xox[a-z]-)""").find(secret)?.value.orEmpty()
         return if (secret.length <= 8) "••••" else prefix + "••••" + secret.takeLast(4)
     }
 

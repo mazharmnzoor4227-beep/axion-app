@@ -84,6 +84,34 @@ class ToolsLibraryTest {
         agent(listOf(Fake("web_search")), emptyMap()).run(emptyList(), UserItem("search the web for karachi weather today"), { listOf(Attempt("Fake", "m", client)) }, rec, intent = Intent.ACTION)
         assertEquals(listOf("Web search & pages"), rec.used)
     }
+    @Test fun researchToggleWarnsWhenResearchGroupIsOff() = runBlocking {
+        // P0-6 (HI-4): composer Research ON + Deep research group OFF must never be a silent normal chat.
+        val seen = mutableListOf<LlmRequest>()
+        val client = object : LlmClient { override fun stream(req: LlmRequest) = flow { seen += req; emit(LlmEvent.Text("ok")); emit(LlmEvent.Finished("stop")) } }
+        val rec = Rec()
+        Agent(Workspace(File(app.filesDir, "workspace")), SkillRepo(app, File(app.filesDir, "skills")),
+            baseTools = listOf(Fake("deep_research")), extraTools = { emptyList() }, toolSwitches = { mapOf("research" to false) }, researchMode = true)
+            .run(emptyList(), UserItem("research the best phones"), { listOf(Attempt("Fake", "m", client)) }, rec, intent = Intent.ACTION)
+        assertTrue("deep_research must not be offered when its group is off", seen[0].tools.none { it.name == "deep_research" })
+        val sys = (seen[0].items.first() as SystemItem).text
+        assertFalse("RESEARCH_GUIDANCE must not be added when the tool was filtered out", sys.contains("RESEARCH MODE is ON"))
+        assertTrue("the run must warn that Deep research is off", sys.contains("Deep research tool group is OFF") && sys.contains("Tools library"))
+    }
+
+    @Test fun researchToggleResearchesWhenResearchGroupIsOn() = runBlocking {
+        // Positive control for the test above: group on + toggle on = real research guidance, tool offered.
+        val seen = mutableListOf<LlmRequest>()
+        val client = object : LlmClient { override fun stream(req: LlmRequest) = flow { seen += req; emit(LlmEvent.Text("ok")); emit(LlmEvent.Finished("stop")) } }
+        val rec = Rec()
+        Agent(Workspace(File(app.filesDir, "workspace")), SkillRepo(app, File(app.filesDir, "skills")),
+            baseTools = listOf(Fake("deep_research")), extraTools = { emptyList() }, toolSwitches = { emptyMap() }, researchMode = true)
+            .run(emptyList(), UserItem("research the best phones"), { listOf(Attempt("Fake", "m", client)) }, rec, intent = Intent.ACTION)
+        assertTrue(seen[0].tools.any { it.name == "deep_research" })
+        val sys = (seen[0].items.first() as SystemItem).text
+        assertTrue(sys.contains("RESEARCH MODE is ON"))
+        assertFalse(sys.contains("Deep research tool group is OFF"))
+    }
+
     @Test fun romanUrduPhoneRequestRoutesToActionWithTools() {
         assertEquals(Intent.ACTION, IntentGate.classify("browser khol kar ye topic search karo"))
         assertEquals(Intent.ACTION, IntentGate.classify("Open the browser and search for weather"))

@@ -207,21 +207,43 @@ class ConnectorRepo(private val ctx: Context) {
 object KeyDetector {
     private val JSONT = "application/json".toMediaType()
 
-    suspend fun detect(key: String, force: Provider? = null): DetectResult = coroutineScope {
+    /**
+     * P0-5 (HI-3): probes providers SEQUENTIALLY in ranked order and stops at the first success — a pasted key is
+     * never broadcast to every guessed provider in parallel. Ranked order (see [guessesFor]): a provider the key's
+     * own prefix names goes first and alone; otherwise Gemini first, then the format heuristics, then the full
+     * [Providers.probeOrder] list. A provider later in the order is only contacted when every earlier one refused.
+     * [probeFn] is the real network probe by default; tests pass a fake to assert the order without network.
+     */
+    suspend fun detect(key: String, force: Provider? = null, probeFn: (Provider, String) -> List<ModelRanker.ModelInfo> = { p, k -> probe(p, k) }): DetectResult {
+        // P0-3 (HI-1): Anthropic was removed — its API is not OpenAI-compatible (/v1/messages + x-api-key), so an
+        // sk-ant- key is refused here, before any provider is probed, instead of being sent around and failing.
+        if (key.trim().startsWith("sk-ant-")) return DetectResult.Fail(UNSUPPORTED_ANTHROPIC)
+        val guesses = guessesFor(key, force)
+        var firstError = ""
+        for (p in guesses) {
+            val r = runCatching { probeFn(p, key) }
+            if (r.isSuccess) return DetectResult.Ok(p, r.getOrThrow())
+            if (firstError.isEmpty()) firstError = r.exceptionOrNull()?.message.orEmpty()
+        }
+        if (guesses.size == 1) {
+            val reason = clean(firstError, key)
+            return DetectResult.Fail("${guesses[0].name} didn't accept this key" + if (reason.isNotBlank()) " — $reason" else "")
+        }
+        return DetectResult.Fail(NOT_RECOGNISED)
+    }
+
+    /** The ranked probe order for a key: prefix-confident provider alone, else Gemini + heuristics, else [Providers.probeOrder]. */
+    internal fun guessesFor(key: String, force: Provider?): List<Provider> {
         val guessed = Providers.guess(key)
-        val guesses = if (force != null) listOf(force)
+        return if (force != null) listOf(force)
             else if (guessed.size <= 1) (guessed + Providers.probeOrder.mapNotNull { Providers.byId(it) }).distinctBy { it.id }.let { all -> if (guessed.isNotEmpty() && guessed[0].prefixes.any { key.startsWith(it) }) guessed else all }
             else guessed
-        val results = guesses.map { p -> async(Dispatchers.IO) { p to runCatching { probe(p, key) } } }.awaitAll()
-        results.firstOrNull { it.second.isSuccess }?.let { (p, r) -> return@coroutineScope DetectResult.Ok(p, r.getOrThrow()) }
-        if (guesses.size == 1) {
-            val reason = clean(results[0].second.exceptionOrNull()?.message.orEmpty(), key)
-            return@coroutineScope DetectResult.Fail("${guesses[0].name} didn't accept this key" + if (reason.isNotBlank()) " — $reason" else "")
-        }
-        DetectResult.Fail(NOT_RECOGNISED)
     }
 
     const val NOT_RECOGNISED = "Key not recognised — pick the provider below and paste it there."
+
+    /** P0-3 (HI-1): Anthropic is not a supported provider in Axion, so its keys are refused, never probed. */
+    const val UNSUPPORTED_ANTHROPIC = "Anthropic is not supported in Axion"
 
     /** Provider errors sometimes echo the key back ("Incorrect API key provided: AQ.Ab8*****mOSw"); never show any of it. */
     fun clean(msg: String, key: String): String {
@@ -291,7 +313,7 @@ object KeyDetector {
 /** v0.5 "My server" (addendum 6): any OpenAI-compatible endpoint — Ollama (`/v1`), llama.cpp server, vLLM, LM Studio. */
 /** v0.5.2: how a saved key is shown — never more than its public prefix and the last 4 ("gsk_ ••••wxyz"). */
 object KeyHint {
-    private val publicPrefix = Regex("""^(sk-ant-|sk-or-v1-|sk-proj-|sk-|AIza|gsk_|ghp_|github_pat_|hf_|xai-|nvapi-|csk-|nfp_|AQ\.)""")
+    private val publicPrefix = Regex("""^(sk-or-v1-|sk-proj-|sk-|AIza|gsk_|ghp_|github_pat_|hf_|xai-|nvapi-|csk-|nfp_|AQ\.)""")
     fun of(key: String): String {
         val k = key.trim()
         if (k.length < 8) return "••••"

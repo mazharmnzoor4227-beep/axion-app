@@ -709,10 +709,32 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         // after the API keys and before Free (slow).
         val pick = g.settings.state.value.mode
         if (pick == "FREE") return free   // picked in the model menu
+        if (pick == "LOCAL" || pick == "SERVER") return ownAttempts(pick)   // P0-4 (HI-2): only the picked own model, never keys/Free — see below
         val own = listOfNotNull(g.connectors.server()?.takeIf { it.enabled }, g.connectors.local()?.takeIf { it.enabled })
-            .sortedBy { c -> if ((pick == "LOCAL" && c.providerId == "local") || (pick == "SERVER" && c.providerId == "myserver")) 0 else 1 }
             .mapNotNull { c -> runCatching { g.connectors.clientFor(c) }.getOrNull()?.let { cl -> Attempt(c.provider.name, c.pinnedModel ?: c.localModel ?: c.models.firstOrNull().orEmpty(), cl, patientMs = if (c.providerId == "local") 150_000 else 90_000) } }
-        return if (pick == "LOCAL" || pick == "SERVER") own + keys + free else keys + own + free
+        return keys + own + free
+    }
+
+    /**
+     * P0-4 (HI-2): LOCAL / SERVER mode uses ONLY the picked own model — never the API keys, never Free (slow).
+     * The old code built the own client inside runCatching{...}.getOrNull() + mapNotNull, so a deleted local model
+     * file or a broken server client silently emptied `own` and the turn was still answered by cloud keys. Now a
+     * missing, disabled or un-buildable own model throws [NoModelException], which the send path catches and shows
+     * as a visible error on the message (ChatViewModel send catch, MsgStatus.ERROR) — and nothing is sent anywhere.
+     */
+    private fun ownAttempts(pick: String): List<Attempt> {
+        val c = (if (pick == "LOCAL") g.connectors.local() else g.connectors.server())?.takeIf { it.enabled }
+            ?: throw NoModelException(
+                if (pick == "LOCAL") "Local mode is on but no local model is set up. Download one in Connectors → Local model."
+                else "Server mode is on but no server is set up. Add one in Connectors → My server."
+            )
+        val cl = runCatching { g.connectors.clientFor(c) }.getOrElse { e ->
+            throw NoModelException(
+                if (pick == "LOCAL") "Local mode is on but the local model could not start (${e.message ?: e.javaClass.simpleName}). Nothing was sent to your API keys."
+                else "Server mode is on but the server could not start (${e.message ?: e.javaClass.simpleName}). Nothing was sent to your API keys."
+            )
+        }
+        return listOf(Attempt(c.provider.name, c.pinnedModel ?: c.localModel ?: c.models.firstOrNull().orEmpty(), cl, patientMs = if (c.providerId == "local") 150_000 else 90_000))
     }
 
     /** Build: Antigravity only (the client itself switches accounts on a limit). No API key, no Free (slow). */

@@ -47,8 +47,12 @@ sealed interface UpdateState {
 
 /** Pure parts (unit-tested on the JVM): feed parsing, version compare, hashes, the certificate rule. */
 object UpdateRules {
-    /** v0.9.3: the phone's app has checked this feed since 0.9.2 (and the PC agent publishes here); the repo feed carries the same releases. */
+    /** v0.9.3: the phone's app has checked this feed since 0.9.2 (and the PC agent publishes here). */
     const val FEED = "https://axion.130-210-62-94.sslip.io/dl/latest.json"
+    /** The repo feed carries the same releases; P0-2 (CR-2): the updater must check BOTH feeds. */
+    const val REPO_FEED = "https://claworabeauty.store/uploads/dl/axion/latest.json"
+    /** Both feeds, in order: whichever answers with the higher versionCode wins. */
+    val FEEDS = listOf(FEED, REPO_FEED)
     /** SHA-256 of Axion's release signing certificate. An update signed with any other key is refused. */
     const val CERT_SHA256 = "d064d58577350df28a532b83062e55a1ddc573799db702634af17fdc70c2e8c4"
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -79,7 +83,8 @@ object UpdateRules {
 
 class AppUpdater(
     private val ctx: Context,
-    private val feed: String = UpdateRules.FEED,
+    /** P0-2 (CR-2): every feed in this list is checked; the highest versionCode wins, and the check still works when any one host is down. */
+    private val feeds: List<String> = UpdateRules.FEEDS,
     private val http: OkHttpClient = Http.download,
     private val currentCode: Int = BuildConfig.VERSION_CODE,
     /** Reads the signer certificates' SHA-256 from an APK; Android's own parser unless a test swaps it. */
@@ -97,11 +102,15 @@ class AppUpdater(
     suspend fun check(): UpdateState = withContext(Dispatchers.IO) {
         _state.value = UpdateState.Checking
         val st = try {
-            val (code, body) = http.newCall(Request.Builder().url(feed + "?t=" + System.currentTimeMillis()).header("User-Agent", Http.UA).header("Cache-Control", "no-cache").build())
-                .execute().use { it.code to it.body?.string().orEmpty() }
-            if (code != 200) UpdateState.Failed("The update server answered $code. Try again later.")
+            // P0-2: ask every feed; a dead host (or a bad feed) is skipped, not fatal — the
+            // highest versionCode among the feeds that answered is what gets offered.
+            val errors = ArrayList<Exception>()
+            val infos = feeds.mapNotNull { url ->
+                runCatching { fetchFeed(url) }.onFailure { errors += it as? Exception ?: IOException(it.message) }.getOrNull()
+            }
+            if (infos.isEmpty()) UpdateState.Failed(UpdateRules.friendly(errors.firstOrNull() ?: IOException("Couldn't check for updates.")))
             else {
-                val info = UpdateRules.parse(body)
+                val info = infos.maxByOrNull { it.versionCode }!!
                 prefs.edit().putLong("lastCheck", System.currentTimeMillis()).apply()
                 if (!UpdateRules.isNewer(info, currentCode)) UpdateState.UpToDate(System.currentTimeMillis())
                 else {
@@ -112,6 +121,14 @@ class AppUpdater(
             }
         } catch (e: Exception) { UpdateState.Failed(UpdateRules.friendly(e)) }
         _state.value = st; st
+    }
+
+    /** One feed fetch: non-200 or an invalid feed body throws, so the caller can try the next feed. */
+    private fun fetchFeed(url: String): UpdateInfo {
+        val (code, body) = http.newCall(Request.Builder().url(url + "?t=" + System.currentTimeMillis()).header("User-Agent", Http.UA).header("Cache-Control", "no-cache").build())
+            .execute().use { it.code to it.body?.string().orEmpty() }
+        if (code != 200) throw IOException("The update server answered $code. Try again later.")
+        return UpdateRules.parse(body)
     }
 
     /** On app start, at most once a day, silently; a notification when something newer is out. */

@@ -30,16 +30,10 @@ data class AppSettings(
     val reviewBeforeApply: Boolean = true,
     /** v0.6.1: a project too large to hold for review (over the ChangeGate limits) may run un-reviewed ONLY if the user switched this on — never silently. */
     val allowLargeUngated: Boolean = false,
-    /** v0.6 Tools library: group id to on/off (missing = the group default; Phone control defaults to OFF). */
+    /** v0.6 Tools library: group id to on/off (missing = the group default). */
     val toolSwitches: Map<String, Boolean> = emptyMap(),
-    /** v0.6 Phone control: the user read the permission screen and agreed. Without it no phone tool ever runs. */
-    val phoneConsent: Boolean = false,
-    /** Phase B: "Hey Axion" wake word. Default OFF — the microphone foreground service runs only while this is on. */
-    val wakeWordEnabled: Boolean = false,
     /** Phase F (v0.8.5): the assistant reads new message notifications aloud. Default OFF; also needs the system's Notification access grant. */
     val assistantAnnounce: Boolean = false,
-    /** Phase F (v0.8.7): Axion's floating character lives on the home screen (needs the Accessibility service, which hosts its window). Default ON — the owner's chosen main surface. */
-    val assistantOrb: Boolean = true,
     val pasteAsFile: String = "Always ask",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,

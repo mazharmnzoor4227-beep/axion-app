@@ -92,7 +92,7 @@ fun ConnectorsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) 
                     if (result == com.mazharansari.axion.data.KeyDetector.NOT_RECOGNISED && key.isNotBlank()) {
                         // Manual fallback: choose the provider, the pasted key stays in the box.
                         Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("gemini", "groq", "openrouter", "mistral", "cerebras", "huggingface", "cohere", "sambanova", "nvidia", "together", "deepseek", "openai", "anthropic", "xai")
+                            listOf("gemini", "groq", "openrouter", "mistral", "cerebras", "huggingface", "cohere", "sambanova", "nvidia", "together", "deepseek", "openai", "xai")
                                 .mapNotNull { Providers.byId(it) }.forEach { pr -> Pill(pr.name) { result = null; connectFor = pr } }
                         }
                     }
@@ -185,7 +185,7 @@ private val brand = mapOf(
     "gemini" to Color(0xFF4C8DF6), "groq" to Color(0xFFF55036), "cerebras" to Color(0xFFF15A29), "mistral" to Color(0xFFFA520F),
     "openrouter" to Color(0xFF6467F2), "github" to Color(0xFF2B3137), "huggingface" to Color(0xFFFFB000), "nvidia" to Color(0xFF76B900),
     "sambanova" to Color(0xFFEE7624), "cohere" to Color(0xFF39594D), "together" to Color(0xFF0F6FFF), "openai" to Color(0xFF10A37F),
-    "anthropic" to Color(0xFFD97757), "deepseek" to Color(0xFF4D6BFE), "xai" to Color(0xFF111111),
+    "deepseek" to Color(0xFF4D6BFE), "xai" to Color(0xFF111111),
 )
 
 @Composable

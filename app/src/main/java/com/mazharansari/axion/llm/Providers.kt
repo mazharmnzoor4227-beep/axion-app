@@ -127,15 +127,6 @@ object Providers {
             fallbackModel = "gpt-4.1",
         ),
         Provider(
-            id = "anthropic", name = "Anthropic", api = ApiKind.OPENAI,
-            baseUrl = "https://api.anthropic.com/v1", keyPage = "https://console.anthropic.com/settings/keys",
-            prefixes = listOf("sk-ant-"), free = false, vision = true,
-            note = "Paid · OpenAI-compatible endpoint",
-            expertPrefs = listOf("claude-sonnet", "claude-opus", "claude-haiku"), fastPrefs = listOf("claude-haiku", "claude-sonnet"),
-            fallbackModel = "claude-sonnet-4-5",
-            extraHeaders = mapOf("anthropic-version" to "2023-06-01"),
-        ),
-        Provider(
             id = "deepseek", name = "DeepSeek", api = ApiKind.OPENAI,
             baseUrl = "https://api.deepseek.com", keyPage = "https://platform.deepseek.com/api_keys",
             free = false, note = "Paid · very cheap",

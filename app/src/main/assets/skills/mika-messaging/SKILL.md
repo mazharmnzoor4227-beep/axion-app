@@ -1,35 +1,35 @@
 ---
 name: messaging
-display: 消息与邮件
-description: 读聊天记录和邮件、拟回复,发给对的人并确认已发出
-aliases: ["发消息", "回消息", "发邮件", "看未读"]
+display: Messages and email
+description: Read chat history and email, draft replies, and hand the user a message that is ready to send
+aliases: ["send a message", "reply to a message", "send an email", "check unread"]
 apps: ["wechat", "feishu"]
 sites: ["instagram.com"]
-terms: ["发消息", "回复", "邮件", "聊天", "群", "未读", "转告", "草稿"]
+terms: ["send a message", "reply", "email", "chat", "group", "unread", "pass on", "draft"]
 ---
-## 入口
+## Entry
 
-先分清用户要读、要拟稿还是要发,以及用哪个 App、哪个账号。用户点名的 App 就用那个 App;它打不开或没登录时,如实告诉用户。
+First work out whether the user wants to read, to draft, or to send — and which app and which account. **Axion cannot open or send WhatsApp, WeChat, or other chat messages: there is no built-in tool that sends messages, and no tool that opens another app's chats.** What it can do is read messages the user pastes or forwards into the chat (or uploads as a file in `uploads/`, read with `read_file`), draft a reply for the user to send, and — only if the user has connected Gmail in Settings → Connectors — send email through that connector's tools (named `mcp_<server>_<tool>`). Never promise to send a chat message, and never say a message was sent when it was only drafted.
 
-## 步骤
+## Steps
 
-1. **读**:先看会话列表或收件箱,找到对的会话后打开读正文;需要时往上翻更早的记录,留意发件人、时间、群成员和附件。未读以列表里的红点和数字为准。
-2. **找对象**:按备注名、昵称、群名或邮箱找到收件人,遇到同名的联系人、群或公众号,打开资料核对。邮件地址用通讯录或往来邮件里的真实地址。
-3. **拟稿**:按用户的意思写好。用户只要稿子时把稿子给用户,到这里为止;用户要发的,写好就发,不用先问。
-4. **发**:进到正确的会话或写信页,输入正文、加附件,发出前再看一遍收件人和全文。
-5. **核对**:发出后在会话里找到这条消息的气泡,或在邮箱的「已发送」里找到这封信,并看有没有发送失败的标记。
+1. **Read**: work from the conversation the user pasted or forwarded, or from a file in `uploads/` read with `read_file`. Note the sender, the time, the group members and any attachments. Unread items are the ones the user says are unread — Axion cannot see another app's unread badges.
+2. **Find the recipient**: match by saved name, nickname, group name or email address. When several contacts, groups or accounts share a name, check the details before drafting. Use the real email address from the user's contacts or from earlier emails with that person.
+3. **Draft**: write it the way the user means it. When the user only wants a draft, give them the draft and stop here. When the user wants it sent, draft it and hand it to them to send in the app themselves — do not send it without them.
+4. **Send (email only, connector only)**: if the user has connected Gmail in Settings → Connectors, use that connector's send tool with the exact recipient and the full draft, and check the tool's result. If there is no connector, say so plainly and hand the draft to the user instead.
+5. **Check**: for a draft, the check is the draft itself, shown to the user with the right recipient and text. For an email sent through a connector, the check is the connector tool's success result — and if it failed, say so and do not claim it went out.
 
-## 容易出错的地方
+## Easy mistakes
 
-- 搜索结果里的同名对象很多,头像和备注不一样,点错就发错人。
-- 输入框清空不等于发出去了;网络差时消息可能停在「发送中」或带红色感叹号。没看到发出的消息,先回会话里查状态,再决定要不要重发,免得发两遍。
-- 有的输入法或键盘设置下按回车就直接发送,多行内容要用换行键或分段输入。
-- 会话列表里的预览只有开头一截,不等于全文。
+- Several people can share a name, and their pictures and saved names differ — drafting for the wrong one sends the wrong message to the wrong person.
+- A draft is not a sent message. Never tell the user a message "has been sent" unless a connector tool returned success for it.
+- A chat preview only shows the first part, never the full text — do not summarise a conversation from previews alone.
+- If the user pastes only part of a conversation, say what is missing instead of guessing the rest.
 
-## 怎样算办成(核实证据)
+## What counts as done (evidence to check)
 
-读:给出的要点和时间都来自打开后的会话或邮件正文。发:会话里能看到这条已发出的消息,或「已发送」里有这封信,收件人和内容都对。
+Read: the points and times you give come from the conversation or email text the user provided. Draft: the user has the full draft with the right recipient. Sent (email via a connector only): the connector tool returned success, with the recipient and content correct.
 
-## 什么时候停下交给用户
+## When to stop and hand it to the user
 
-需要登录、输入验证码,或者对象和内容有不止一种可能、要用户来选的时候,交给用户。
+When a login or verification code is needed, or when the recipient or the content has more than one possible reading and the user has to choose, hand it to the user. When the user asks Axion to send a WhatsApp, WeChat, or other chat message, say plainly that Axion cannot send it and hand over a ready-to-send draft instead.

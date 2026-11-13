@@ -63,9 +63,12 @@ object ApprovalGate {
 
     /**
      * The command "kind": leading env assignments and sudo skipped, then program +
-     * subcommand when the second word really is one (no path, flag, dot or colon —
-     * so "git status" and "npm run" are kinds, but "python3 build.py" keys on
-     * "python3" and "cat notes.txt" on "cat").
+     * flags + the first real argument. A bare second word is a subcommand ("git status",
+     * "npm run"); anything else is the actual target of the command, and the remembered
+     * rule must name it — P0-11 (ME-17): "python3 build.py" must not also allow
+     * "python3 other.py", and "rm -rf /tmp/x" must not also allow "rm -rf /".
+     * (Read-only programs such as "cat notes.txt" now also key on their file; they are
+     * never gated, so that changes nothing about what runs without asking.)
      */
     fun patternOf(command: String): String {
         val first = command.lineSequence().firstOrNull().orEmpty()
@@ -75,10 +78,18 @@ object ApprovalGate {
         while (i < toks.size && (toks[i].contains('=') || toks[i] == "sudo")) i++
         if (i >= toks.size) i = 0
         val program = toks[i].substringAfterLast('/')
-        val second = toks.getOrNull(i + 1)?.takeIf { t ->
+        val rest = toks.drop(i + 1)
+        val flags = rest.takeWhile { it.startsWith("-") && it != "-" }
+        val firstArg = rest.drop(flags.size).firstOrNull()
+        val sub = firstArg?.takeIf { t ->
             !t.startsWith("-") && '/' !in t && '.' !in t && ':' !in t && '=' !in t
         }
-        return if (second != null) "$program $second" else program
+        return when {
+            sub != null && flags.isEmpty() -> "$program $sub"
+            firstArg != null -> (listOf(program) + flags + firstArg).joinToString(" ")
+            flags.isNotEmpty() -> (listOf(program) + flags).joinToString(" ")
+            else -> program
+        }
     }
 
     private fun isReadOnly(cmd: String): Boolean {
@@ -94,13 +105,56 @@ object ApprovalGate {
         // money: never remembered, always a fresh human yes
         if (Regex("\\b(bank|banking|payment|pay now|paytm|easypaisa|jazzcash|raast|paypal|stripe|checkout|billing|credit card|debit card|send money|transfer money|wire transfer|upi)\\b").containsMatchIn(c))
             return "This mentions banking or a payment."
-        // irreversibly destructive shell work
-        if (Regex("rm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\s+(/|~|[$]home|/data|/system|/storage)(\\s|/|$)").containsMatchIn(c))
+        // irreversibly destructive shell work — P0-11 (ME-17): the old regex required "/" to be
+        // followed by a space, slash or end, so "rm -rf /*" (and "--recursive --force" spellings)
+        // slipped through as a normal gate. Token-based: recursive + force flags aimed at a root.
+        if (isDestructiveRm(command))
             return "This deletes files at the root of the phone's storage."
         if (Regex("\\bmkfs|\\bdd\\s+[^|]*of=/dev/|>\\s*/dev/block|\\bformat\\s+/dev/").containsMatchIn(c))
             return "This can format or overwrite a whole storage device."
         if (c.contains(":(){") || Regex("\\bshutdown\\b|\\breboot\\b|\\bpoweroff\\b").containsMatchIn(c))
             return "This can crash or switch off the phone."
         return null
+    }
+
+    /**
+     * P0-11 (ME-17): `rm` with recursive + force flags aimed at a root of the phone's
+     * storage. Every chained segment is checked, so `echo hi; rm -rf /*` is caught too.
+     * Short flags may be combined (`-rf`, `-fr`, `-rfv`) or separate (`-r -f`); long flags
+     * (`--recursive --force`) count the same. A root target is `/` (so `rm -rf / *` and
+     * `rm -rf / --no-preserve-root` count — the bare `/` operand is the danger), `/*`,
+     * `~`, `$HOME`, `/data`, `/system`, `/storage`, `/sdcard` or `/home`, or anything
+     * directly under one of those roots. `rm -rf /tmp/x` is NOT a root: it stays a
+     * normal gate with its own fine-grained remembered pattern.
+     */
+    private fun isDestructiveRm(command: String): Boolean {
+        val roots = setOf("/", "/*", "/**", "~", "\$home", "/data", "/system", "/storage", "/sdcard", "/home")
+        for (seg in command.split(Regex("&&|\\|\\||;|\\|"))) {
+            val toks = seg.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+            if (toks.isEmpty()) continue
+            var i = 0
+            while (i < toks.size && (toks[i].contains('=') || toks[i] == "sudo")) i++
+            if (i >= toks.size || toks[i].substringAfterLast('/') != "rm") continue
+            var recursive = false; var force = false; var j = i + 1
+            while (j < toks.size && toks[j].startsWith("-") && toks[j] != "-") {
+                val flag = toks[j]
+                when {
+                    flag == "--recursive" -> recursive = true
+                    flag == "--force" -> force = true
+                    flag.startsWith("--") -> { /* --no-preserve-root and friends: not r/f */ }
+                    else -> { if ('r' in flag) recursive = true; if ('f' in flag) force = true }
+                }
+                j++
+            }
+            if (!recursive || !force) continue
+            for (k in j until toks.size) {
+                val op = toks[k]
+                if (op.startsWith("-")) continue   // trailing flags, e.g. --no-preserve-root
+                if (op in roots || op.startsWith("/*") || op.startsWith("~/") ||
+                    op.startsWith("/data/") || op.startsWith("/system/") || op.startsWith("/storage/") ||
+                    op.startsWith("/sdcard/") || op.startsWith("/home/")) return true
+            }
+        }
+        return false
     }
 }

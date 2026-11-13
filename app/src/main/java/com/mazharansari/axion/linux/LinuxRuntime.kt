@@ -418,6 +418,11 @@ class LinuxRuntime(private val ctx: Context) {
         /** tar.gz → dir with symlinks, hard links and modes kept; refuses paths that escape [dest]. */
         fun extractTarGz(archive: File, dest: File, onCount: (Int) -> Unit = {}) {
             val canonical = dest.canonicalPath
+            // A path is inside the destination only on a real boundary: "/tmp/x2" is not inside "/tmp/x".
+            fun inside(path: String) = path == canonical || path.startsWith(canonical + File.separator)
+            /** Where a symlink points once the OS resolves it (relative targets: from the link's own parent). */
+            fun symlinkTarget(link: File, linkName: String): File =
+                if (File(linkName).isAbsolute) File(linkName) else File(link.parentFile, linkName)
             val hardLinks = mutableListOf<Pair<File, File>>()
             var n = 0
             TarArchiveInputStream(GZIPInputStream(BufferedInputStream(archive.inputStream(), 1 shl 16))).use { tar ->
@@ -426,11 +431,27 @@ class LinuxRuntime(private val ctx: Context) {
                     val name = e.name.removePrefix("./").trimEnd('/')
                     if (name.isNotEmpty() && !name.startsWith("dev/")) {
                         val target = File(dest, name)
-                        require(target.canonicalPath.startsWith(canonical) || e.isSymbolicLink) { "Unsafe path in archive: $name" }
+                        // P0-8 (HI-6): symlinks are NO LONGER exempt from the path check — an entry
+                        // named "../escape" was waved through before. target.canonicalPath also
+                        // resolves symlinks planted by EARLIER entries, so a file written through
+                        // such a link is caught here as well.
+                        require(inside(target.canonicalPath)) { "Unsafe path in archive: $name" }
                         when {
                             e.isDirectory -> target.mkdirs()
-                            e.isSymbolicLink -> { target.parentFile?.mkdirs(); target.delete(); runCatching { Os.symlink(e.linkName, target.absolutePath) }.getOrElse { java.nio.file.Files.createSymbolicLink(target.toPath(), java.nio.file.Paths.get(e.linkName)) } }
-                            e.isLink -> hardLinks += target to File(dest, e.linkName.removePrefix("./"))
+                            e.isSymbolicLink -> {
+                                // The link TARGET (e.linkName) is an arbitrary path in the archive:
+                                // resolve it the way the filesystem will and refuse it if it escapes.
+                                val resolved = symlinkTarget(target, e.linkName)
+                                require(inside(resolved.canonicalPath)) { "Unsafe symlink target in archive: $name -> ${e.linkName}" }
+                                target.parentFile?.mkdirs(); target.delete(); runCatching { Os.symlink(e.linkName, target.absolutePath) }.getOrElse { java.nio.file.Files.createSymbolicLink(target.toPath(), java.nio.file.Paths.get(e.linkName)) }
+                            }
+                            e.isLink -> {
+                                // Hard-link targets are archive-root-relative; an absolute one used
+                                // to escape File(dest, …) entirely. Same rule as symlinks.
+                                val src = File(dest, e.linkName.removePrefix("./"))
+                                require(inside(src.canonicalPath)) { "Unsafe hard link target in archive: $name -> ${e.linkName}" }
+                                hardLinks += target to src
+                            }
                             e.isFile -> {
                                 target.parentFile?.mkdirs()
                                 FileOutputStream(target).use { tar.copyTo(it, 1 shl 16) }
@@ -442,7 +463,11 @@ class LinuxRuntime(private val ctx: Context) {
                     e = tar.nextEntry
                 }
             }
-            hardLinks.forEach { (link, src) -> link.parentFile?.mkdirs(); link.delete(); runCatching { Os.link(src.absolutePath, link.absolutePath) }.getOrElse { src.copyTo(link, true); link.setExecutable(src.canExecute(), false) } }
+            hardLinks.forEach { (link, src) ->
+                // Re-check now that every entry exists: the source's real location (through any symlink) must still be inside dest.
+                require(inside(src.canonicalPath)) { "Unsafe hard link target in archive: ${src.path}" }
+                link.parentFile?.mkdirs(); link.delete(); runCatching { Os.link(src.absolutePath, link.absolutePath) }.getOrElse { src.copyTo(link, true); link.setExecutable(src.canExecute(), false) }
+            }
             onCount(n)
         }
 

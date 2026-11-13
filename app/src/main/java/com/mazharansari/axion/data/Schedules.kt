@@ -42,6 +42,17 @@ data class ScheduleEntry(
     val lastRunAt: Long = 0,
     /** "" until it first runs; then "done" or a short error line. */
     val lastStatus: String = "",
+    /**
+     * P0-7 (HI-5) stable anchor: the epoch ms of the next intended fire, set when
+     * the schedule is armed and rolled forward by ScheduleEngine.anchorFor.
+     * It records INTENT (a wall-clock time), not WorkManager's actual first-run
+     * time — WorkManager may still run minutes late in Doze, and the periodic
+     * chain then repeats from that late run. What the anchor stops is
+     * restart-driven drift: without it, every app start cancelled and
+     * re-enqueued the job, dropping a pending run that had not fired yet.
+     * 0 = never armed yet.
+     */
+    val anchorEpochMs: Long = 0,
 ) {
     /** "Daily at 09:00" / "Every Monday at 09:00" / "Once, 12 Nov 2026 at 09:00". */
     fun describe(): String {
@@ -79,6 +90,9 @@ class SchedulesStore(ctx: Context) {
     fun remove(id: String) = mutate { list -> list.filterNot { it.id == id } }
 
     fun setEnabled(id: String, on: Boolean) = mutate { list -> list.map { if (it.id == id) it.copy(enabled = on) else it } }
+
+    /** P0-7: persist the stable anchor for [id] (see [ScheduleEntry.anchorEpochMs]). */
+    fun setAnchor(id: String, anchorMs: Long) = mutate { list -> list.map { if (it.id == id) it.copy(anchorEpochMs = anchorMs) else it } }
 
     fun markRan(id: String, status: String) = mutate { list ->
         list.map { if (it.id == id) it.copy(lastRunAt = System.currentTimeMillis(), lastStatus = status.take(200)) else it }

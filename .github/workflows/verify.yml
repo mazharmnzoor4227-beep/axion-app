@@ -1,9 +1,15 @@
 # v0.9.4: unit-test verification for the composer fix (and every later fix branch).
 # The release workflow (build.yml) only assembles the APK — it never runs tests, so a
 # green build alone says nothing about the test suite. This workflow runs the unit tests
-# and always uploads the reports; judge the run by the REPORT contents, not the job
-# conclusion: the known legacy failures are V03ScreensTest x2, V053AuthStorageTest x1,
-# V053ScreensTest x3, V05ScreensTest x1. Anything outside that set is a real regression.
+# and always uploads the reports. The job FAILS when any test fails (no `|| true` on the
+# test step) and a summary step lists the failing tests; judge a red run by the SUMMARY
+# and the REPORT contents, not by the failure count alone: the known legacy failures are
+# V03ScreensTest x2, V053AuthStorageTest x1, V05ScreensTest x1. Anything outside that set
+# is a real regression.
+# NOTE: the legacy counts above are carried over from the last full run — they were NOT
+# regenerated here (Gradle cannot run in this environment). V053ScreensTest x3 was
+# removed from the list: no V053ScreensTest.kt exists in app/src/test. Re-run the full
+# suite in CI and update the counts from the real results; do not trust them blindly.
 name: Verify Tests (v0.9.4)
 on:
   push:
@@ -12,6 +18,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -26,7 +33,40 @@ jobs:
       - name: Run unit tests
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest --no-daemon --stacktrace || true
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace
+      - name: Summarise failures
+        if: always()
+        run: |
+          {
+            echo "## Test results"
+            if ls app/build/test-results/testDebugUnitTest/*.xml >/dev/null 2>&1; then
+              python3 - <<'PY'
+              import glob, xml.etree.ElementTree as ET
+              total = failures = 0
+              failed = []
+              for f in glob.glob("app/build/test-results/testDebugUnitTest/*.xml"):
+                  try:
+                      root = ET.parse(f).getroot()
+                  except Exception:
+                      continue
+                  for ts in root.iter("testsuite"):
+                      total += int(ts.get("tests", 0))
+                      failures += int(ts.get("failures", 0)) + int(ts.get("errors", 0))
+                      for tc in ts.iter("testcase"):
+                          if tc.find("failure") is not None or tc.find("error") is not None:
+                              failed.append(f"{tc.get('classname', '')}.{tc.get('name', '')}")
+              print(f"- Tests run: {total}, failed: {failures}")
+              if failed:
+                  print("- Failing tests:")
+                  for name in sorted(set(failed)):
+                      print(f"  - {name}")
+              else:
+                  print("- No failing tests.")
+              PY
+            else
+              echo "No test result XML found — the test step did not produce reports."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

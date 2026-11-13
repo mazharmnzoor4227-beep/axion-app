@@ -346,7 +346,18 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                 // same behaviour, only the placement changed. Ask only: Build never shows them.
                 if (!build) ToolsRow(
                     researchOn = settings.deepResearch,
-                    onResearch = { g.settings.update { it.copy(deepResearch = !it.deepResearch) } },
+                    // P0-6 (HI-4): turning Research ON while the Deep research tool group is off in the
+                    // Tools library would silently do nothing (the agent filters the tool out). Re-enable
+                    // the group instead, and say so — the toggle then really researches.
+                    onResearch = {
+                        val s = g.settings.state.value
+                        if (!s.deepResearch && s.toolSwitches["research"] == false) {
+                            g.settings.update { it.copy(deepResearch = true, toolSwitches = it.toolSwitches + ("research" to true)) }
+                            vm.toast = "Deep research turned back on in Tools library."
+                        } else {
+                            g.settings.update { it.copy(deepResearch = !it.deepResearch) }
+                        }
+                    },
                     longTaskOn = settings.longTask,
                     onLongTask = { g.settings.update { it.copy(longTask = !it.longTask) } },
                     modifier = Modifier.padding(bottom = 8.dp),

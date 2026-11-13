@@ -75,7 +75,7 @@ fun SchedulesScreen(vm: ChatViewModel, back: () -> Unit) {
                         Switch(checked = e.enabled, onCheckedChange = { on ->
                             store.setEnabled(e.id, on)
                             val fresh = store.get(e.id) ?: e.copy(enabled = on)
-                            if (on) ScheduleEngine.arm(ctx, fresh) else ScheduleEngine.disarm(ctx, e.id)
+                            if (on) ScheduleEngine.arm(ctx, fresh, store) else ScheduleEngine.disarm(ctx, e.id)
                         })
                     }
                 }

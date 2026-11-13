@@ -69,7 +69,7 @@ class ScheduleCreateTool : Tool {
             else -> return ToolOutput("type must be 'once', 'daily' or 'weekly'.", isError = true)
         }
         store.add(entry)
-        ScheduleEngine.arm(appCtx, entry)
+        ScheduleEngine.arm(appCtx, entry, store)
         val next = ScheduleEngine.nextRunMs(entry)
         val whenText = java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.ENGLISH).format(java.util.Date(next))
         return ToolOutput("Scheduled \"${entry.title}\" — ${entry.describe()}. First run: $whenText. When it fires, Axion does the task on its own, saves the result as a new chat and notifies the user. It is listed in Settings → Schedules, where it can be switched off or deleted.",
