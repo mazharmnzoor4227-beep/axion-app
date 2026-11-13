@@ -6,7 +6,7 @@ import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
 
-/** P0-11 (ME-17): `rm -rf /*` and variants hard-deny every time, and remembered approvals key on the full command shape, not the bare program name. Pure Kotlin — no Android needed. */
+// P0-11 (ME-17): `rm -rf /*` and variants hard-deny every time, and remembered approvals key on the full command shape, not the bare program name. Pure Kotlin — no Android needed.
 class ApprovalGateTest {
 
     private fun gate(cmd: String) = ApprovalGate.requestFor("run_command", buildJsonObject { put("command", cmd) })
