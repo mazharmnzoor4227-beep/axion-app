@@ -119,10 +119,10 @@ object ApprovalGate {
 
     /**
      * P0-11 (ME-17): `rm` with recursive + force flags aimed at a root of the phone's
-     * storage. Every chained segment is checked, so `echo hi; rm -rf /*` is caught too.
+     * storage. Every chained segment is checked, so `echo hi; rm -rf / *` is caught too.
      * Short flags may be combined (`-rf`, `-fr`, `-rfv`) or separate (`-r -f`); long flags
      * (`--recursive --force`) count the same. A root target is `/` (so `rm -rf / *` and
-     * `rm -rf / --no-preserve-root` count — the bare `/` operand is the danger), `/*`,
+     * `rm -rf / --no-preserve-root` count — the bare `/` operand is the danger), `/` followed by `*`,
      * `~`, `$HOME`, `/data`, `/system`, `/storage`, `/sdcard` or `/home`, or anything
      * directly under one of those roots. `rm -rf /tmp/x` is NOT a root: it stays a
      * normal gate with its own fine-grained remembered pattern.
