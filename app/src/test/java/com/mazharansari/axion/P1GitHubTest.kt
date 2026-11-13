@@ -12,6 +12,7 @@ import com.mazharansari.axion.github.GitAction
 import com.mazharansari.axion.security.SecretScanner
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
