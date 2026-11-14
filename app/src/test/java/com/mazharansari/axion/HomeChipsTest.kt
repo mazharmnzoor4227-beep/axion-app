@@ -3,7 +3,7 @@ package com.mazharansari.axion
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.mazharansari.axion.ui.chat.ToolsRow
 import com.mazharansari.axion.ui.home.SuggestionChips
@@ -26,7 +26,7 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34])
 class HomeChipsTest {
-    @get:Rule val compose = createEmptyComposeRule()
+    @get:Rule val compose = createComposeRule()
 
     /** The visible texts in layout order, depth-first through the semantics tree. */
     private fun orderedTexts(): List<String> {

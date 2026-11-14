@@ -3,6 +3,7 @@ package com.mazharansari.axion
 import com.mazharansari.axion.mcp.StdioRpc
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -41,8 +42,11 @@ class ObscuraRealBinaryTest {
     fun obscuraMcpListsBrowserTools() {
         val bin = findObscuraBinary()
         assumeTrue("No obscura binary on PATH (set OBSCURA_BIN to run this test)", bin != null)
+        // The server's stderr goes to the test output: Redirect.DISCARD does not
+        // exist in the android.jar stub ProcessBuilder that unit tests compile
+        // against (CI: "Unresolved reference 'DISCARD'"), so INHERIT it is.
         val proc = ProcessBuilder(bin!!.absolutePath, "mcp")
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.INHERIT)
             .start()
         val lines = Collections.synchronizedList(ArrayList<String>())
         val pump = Thread {
