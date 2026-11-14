@@ -123,7 +123,14 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.18.1")
-    implementation("com.tom-roush:pdfbox-android:2.0.27.0")   // v0.3: PDF → skill text
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0") {   // v0.3: PDF → skill text
+        // 0.9.5 release fix: pdfbox pulls BouncyCastle jdk15to18 1.72, but sshj (P1-3) pulls
+        // bcprov/bcpkix-jdk18on 1.84 — same classes in both jars, so :app:checkReleaseDuplicateClasses
+        // fails on release builds. Keep only the newer jdk18on jars (BC keeps API compat for the
+        // small crypto surface PDFBox uses for encrypted PDFs).
+        exclude(group = "org.bouncycastle", module = "bcprov-jdk15to18")
+        exclude(group = "org.bouncycastle", module = "bcpkix-jdk15to18")
+    }
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.apache.commons:commons-compress:1.27.1")   // v0.4: Ubuntu base .tar.gz
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
