@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mazharansari.axion.data.Attachment
@@ -155,15 +156,19 @@ private fun SendButton(state: Int, onSend: () -> Unit, onStop: () -> Unit, onVoi
  * on-accent text/icons AND a check mark — a shade change alone is not enough to tell
  * (the user could not tell whether a tap had actually turned a toggle on). OFF is a
  * bordered chip, never a flat blob, so it still reads as a button.
+ *
+ * 0.9.6: [height]/[horizontalPadding] let the empty home render the same toggles at
+ * the suggestion row's 44 dp height (same visual family as its chips); the in-chat
+ * ToolsRow keeps the 36 dp default.
  */
 @Composable
-private fun ToolChip(icon: Int, label: String, on: Boolean, onClick: () -> Unit) {
+private fun ToolChip(icon: Int, label: String, on: Boolean, onClick: () -> Unit, height: Dp = 36.dp, horizontalPadding: Dp = 12.dp) {
     val p = P; val tap = rememberTap(onClick)
     Row(
-        Modifier.height(36.dp).clip(RoundedCornerShape(50))
+        Modifier.height(height).clip(RoundedCornerShape(50))
             .background(if (on) p.accent else p.chip)
             .border(1.dp, if (on) p.accent else p.border, RoundedCornerShape(50))
-            .clickable(onClick = tap).padding(start = 12.dp, end = 12.dp),
+            .clickable(onClick = tap).padding(start = horizontalPadding, end = horizontalPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         GkIcon(icon, null, 17.dp, if (on) p.onAccent else p.text2)
@@ -178,27 +183,28 @@ private fun ToolChip(icon: Int, label: String, on: Boolean, onClick: () -> Unit)
 
 /** v0.11: the Deep Research toggle — filled with the accent colour while on, so the mode is visible at a glance. */
 @Composable
-private fun ResearchChip(on: Boolean, onClick: () -> Unit) {
-    ToolChip(Gk.search, "Research", on, onClick)
+fun ResearchChip(on: Boolean, onClick: () -> Unit, height: Dp = 36.dp, horizontalPadding: Dp = 12.dp) {
+    ToolChip(Gk.search, "Research", on, onClick, height, horizontalPadding)
 }
 
 /** v0.12: the Long task toggle — same chip family as Research: accent-filled while on. */
 @Composable
-private fun LongTaskChip(on: Boolean, onClick: () -> Unit) {
-    ToolChip(Gk.clock, "Long task", on, onClick)
+fun LongTaskChip(on: Boolean, onClick: () -> Unit, height: Dp = 36.dp, horizontalPadding: Dp = 12.dp) {
+    ToolChip(Gk.clock, "Long task", on, onClick, height, horizontalPadding)
 }
 
 /** P1-3: the Turbo (server) toggle — same chip family as Research: accent-filled while on. */
 @Composable
-private fun TurboChip(on: Boolean, onClick: () -> Unit) {
-    ToolChip(Gk.rocket, "Turbo", on, onClick)
+fun TurboChip(on: Boolean, onClick: () -> Unit, height: Dp = 36.dp, horizontalPadding: Dp = 12.dp) {
+    ToolChip(Gk.rocket, "Turbo", on, onClick, height, horizontalPadding)
 }
 
 /**
  * v0.9.4: the 10X tool toggles (Research, Long task) live in their own line ABOVE the composer box,
  * not inside it. Inside the box they pushed the mic and the Send button off the right edge — the
  * user had no Send button at all. Same chips, same behaviour, only the placement changed.
- * Rendered by HomeScreen directly above Composer (Ask only).
+ * Rendered by HomeScreen directly above Composer in an active chat; on the empty home the
+ * toggles live in the merged suggestion row instead (0.9.6).
  */
 @Composable
 fun ToolsRow(researchOn: Boolean, onResearch: () -> Unit, longTaskOn: Boolean, onLongTask: () -> Unit, turboOn: Boolean = false, onTurbo: () -> Unit = {}, modifier: Modifier = Modifier) {

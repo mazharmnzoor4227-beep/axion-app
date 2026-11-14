@@ -355,43 +355,44 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                 vm.localSpeed?.let { sp ->
                     Text(sp.label(), style = Type.tiny, color = p.text2, maxLines = 1, modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
                 }
+                // 0.9.6: the three tool toggles — one set of callbacks, shared by the
+                // merged empty-home row and by the in-chat ToolsRow below.
+                val onResearch: () -> Unit = {
+                    val s = g.settings.state.value
+                    if (!s.deepResearch && s.toolSwitches["research"] == false) {
+                        g.settings.update { it.copy(deepResearch = true, toolSwitches = it.toolSwitches + ("research" to true)) }
+                        vm.toast = "Deep research turned back on in Tools library."
+                    } else {
+                        // A tap must say so: a shade change alone left the user unsure the toggle had worked.
+                        val on = !s.deepResearch
+                        g.settings.update { it.copy(deepResearch = on) }
+                        vm.toast = if (on) "Deep research ON — your next message will use deep research." else "Deep research OFF."
+                    }
+                }
+                val onLongTask: () -> Unit = {
+                    val on = !settings.longTask
+                    g.settings.update { it.copy(longTask = on) }
+                    vm.toast = if (on) "Long task ON — your next message will run as a long task." else "Long task OFF."
+                }
+                val onTurbo: () -> Unit = {
+                    val on = !settings.turbo
+                    g.settings.update { it.copy(turbo = on) }
+                    vm.toast = if (on) "Turbo ON — your next task runs on your server." else "Turbo OFF."
+                }
                 // v0.5.2 (mazhar's test): Build never shows the Ask-only key chips — it shows what Build actually needs.
                 if (messages.isEmpty() && !plus && !model && build) BuildChips(ready = vm.buildReady(), onAgy = { navigate(Route.Antigravity) }, onTools = { navigate(Route.DevTools) })
-                else if (messages.isEmpty() && !plus && !model) SuggestionChips(noKeys = connectors.isEmpty(), onConnect = { navigate(Route.Connectors) }, onSkills = { navigate(Route.Skills) }, onBuild = onBuild, onVoice = { navigate(Route.VoiceCall) })
+                else if (messages.isEmpty() && !plus && !model) SuggestionChips(noKeys = connectors.isEmpty(), researchOn = settings.deepResearch, onResearch = onResearch, longTaskOn = settings.longTask, onLongTask = onLongTask, turboOn = settings.turbo, onTurbo = onTurbo, onConnect = { navigate(Route.Connectors) }, onSkills = { navigate(Route.Skills) }, onBuild = onBuild, onVoice = { navigate(Route.VoiceCall) })
                 // v0.9.4: the 10X tool toggles live in their own line ABOVE the box — inside the box they
                 // pushed the mic and the Send button off the right edge (no Send at all). Same chips,
                 // same behaviour, only the placement changed. Ask only: Build never shows them.
-                if (!build) ToolsRow(
-                    researchOn = settings.deepResearch,
-                    // P0-6 (HI-4): turning Research ON while the Deep research tool group is off in the
-                    // Tools library would silently do nothing (the agent filters the tool out). Re-enable
-                    // the group instead, and say so — the toggle then really researches.
-                    onResearch = {
-                        val s = g.settings.state.value
-                        if (!s.deepResearch && s.toolSwitches["research"] == false) {
-                            g.settings.update { it.copy(deepResearch = true, toolSwitches = it.toolSwitches + ("research" to true)) }
-                            vm.toast = "Deep research turned back on in Tools library."
-                        } else {
-                            // A tap must say so: a shade change alone left the user unsure the toggle had worked.
-                            val on = !s.deepResearch
-                            g.settings.update { it.copy(deepResearch = on) }
-                            vm.toast = if (on) "Deep research ON — your next message will use deep research." else "Deep research OFF."
-                        }
-                    },
-                    longTaskOn = settings.longTask,
-                    onLongTask = {
-                        val on = !settings.longTask
-                        g.settings.update { it.copy(longTask = on) }
-                        vm.toast = if (on) "Long task ON — your next message will run as a long task." else "Long task OFF."
-                    },
+                // 0.9.6: on the empty home the toggles already live in the merged SuggestionChips
+                // row above, so the standalone row renders only in an active chat — one row, not two.
+                if (showToolsRow(messages.isEmpty(), build)) ToolsRow(
+                    researchOn = settings.deepResearch, onResearch = onResearch,
+                    longTaskOn = settings.longTask, onLongTask = onLongTask,
                     // P1-3 Turbo (server): per-task toggle; off by default, and it only takes
                     // effect when a server is set up in Settings → Turbo (server).
-                    turboOn = settings.turbo,
-                    onTurbo = {
-                        val on = !settings.turbo
-                        g.settings.update { it.copy(turbo = on) }
-                        vm.toast = if (on) "Turbo ON — your next task runs on your server." else "Turbo OFF."
-                    },
+                    turboOn = settings.turbo, onTurbo = onTurbo,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 Composer(
@@ -530,12 +531,29 @@ private fun BuildChips(ready: Boolean, onAgy: () -> Unit, onTools: () -> Unit) {
     }
 }
 
-/** The chip row above the composer on an empty chat ("Save 50% on Premium" · "Try Connectors" in Grok). */
+/**
+ * 0.9.6: whether the standalone ToolsRow renders above the composer. It renders
+ * only in an active chat — on the empty home the toggles already live in the merged
+ * SuggestionChips row, so a second row would stack two chip rows above the box.
+ * Build never shows it either.
+ */
+internal fun showToolsRow(messagesEmpty: Boolean, build: Boolean): Boolean = !build && !messagesEmpty
+
+/**
+ * The ONE chip row above the composer on an empty chat ("Save 50% on Premium" · "Try Connectors" in Grok).
+ * 0.9.6: the three tool toggles lead the row (after the blue key chip, when it shows), at the same
+ * 44 dp height and spacing as the suggestion chips, so it reads as a single row: Research, Long task,
+ * Turbo, Try Connectors, Skills, Build an app, Voice. The toggles keep their ToolChip behaviour
+ * (accent fill + check when on, toast on every tap) — only the row they live in changed.
+ */
 @Composable
-private fun SuggestionChips(noKeys: Boolean, onConnect: () -> Unit, onSkills: () -> Unit, onBuild: () -> Unit, onVoice: () -> Unit) {
+internal fun SuggestionChips(noKeys: Boolean, researchOn: Boolean, onResearch: () -> Unit, longTaskOn: Boolean, onLongTask: () -> Unit, turboOn: Boolean, onTurbo: () -> Unit, onConnect: () -> Unit, onSkills: () -> Unit, onBuild: () -> Unit, onVoice: () -> Unit) {
     val p = P
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (noKeys) Chip(Gk.key, "Connect a free AI key", blue = true, onClick = onConnect)
+        ResearchChip(researchOn, onResearch, height = 44.dp, horizontalPadding = 16.dp)
+        LongTaskChip(longTaskOn, onLongTask, height = 44.dp, horizontalPadding = 16.dp)
+        TurboChip(turboOn, onTurbo, height = 44.dp, horizontalPadding = 16.dp)
         Chip(Gk.connectors, "Try Connectors", onClick = onConnect)
         Chip(Gk.skills, "Skills", onClick = onSkills)
         Chip(Gk.hammer, "Build an app", onClick = onBuild)
