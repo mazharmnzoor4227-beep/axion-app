@@ -130,6 +130,7 @@ dependencies {
         // small crypto surface PDFBox uses for encrypted PDFs).
         exclude(group = "org.bouncycastle", module = "bcprov-jdk15to18")
         exclude(group = "org.bouncycastle", module = "bcpkix-jdk15to18")
+        exclude(group = "org.bouncycastle", module = "bcutil-jdk15to18")
     }
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.apache.commons:commons-compress:1.27.1")   // v0.4: Ubuntu base .tar.gz
