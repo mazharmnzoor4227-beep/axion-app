@@ -224,7 +224,9 @@ fun BrowserScreen(vm: ChatViewModel, back: () -> Unit) {
         }
         if (isObscura) {
             // An Obscura tab has no WebView: title + URL + the latest screenshot above the page text.
-            ObscuraTabContent(title, url, obscuraShot, obscuraPage)
+            // The weight lives here, in the parent Column's scope — weight is a ColumnScope
+            // member and does not resolve inside ObscuraTabContent itself.
+            ObscuraTabContent(title, url, obscuraShot, obscuraPage, Modifier.weight(1f).fillMaxWidth())
         } else {
             key(activeTabId) {
                 AndroidView(
@@ -260,7 +262,7 @@ fun BrowserScreen(vm: ChatViewModel, back: () -> Unit) {
  * tools, so the tab is never a blank or dead screen.
  */
 @Composable
-private fun ObscuraTabContent(title: String, url: String, shot: File?, page: BrowserPage?) {
+private fun ObscuraTabContent(title: String, url: String, shot: File?, page: BrowserPage?, modifier: Modifier = Modifier) {
     val scroll = rememberScrollState()
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(shot) {
@@ -269,7 +271,7 @@ private fun ObscuraTabContent(title: String, url: String, shot: File?, page: Bro
         }
     }
     Column(
-        Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll).padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier.verticalScroll(scroll).padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         Text(title.ifBlank { "Obscura" }, style = Type.title, color = P.text)
         Text(url, style = Type.tiny, color = P.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
