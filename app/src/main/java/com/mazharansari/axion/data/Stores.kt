@@ -54,6 +54,15 @@ data class AppSettings(
     val permsShown: Boolean = false,
     /** P2-8: the read-only status page (localhost only, no control surface). Default OFF. */
     val statusServer: Boolean = false,
+    /** 0.9.6: the engine the Browser screen's "+" picker last created a tab with ("webview" / "obscura"). */
+    val lastUserBrowserEngine: String = "webview",
+    /**
+     * 0.9.6: whether agent browsing opens the Browser screen on its own. Default
+     * OFF — nothing in the app navigates to Route.Browser on the agent's behalf
+     * today (only the user's tap in Settings does), so this stays a stored
+     * preference until a caller ever needs the gate.
+     */
+    val openBrowserOnAgentBrowsing: Boolean = false,
 )
 
 class SettingsStore(ctx: Context) {

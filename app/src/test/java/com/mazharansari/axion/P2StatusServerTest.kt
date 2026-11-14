@@ -16,7 +16,7 @@ import org.junit.Test
 class P2StatusServerTest {
 
     private val fakeSnapshot = StatusSnapshot(
-        appVersion = "0.9.5",
+        appVersion = "0.9.6",
         chats = 7,
         schedules = 3,
         nextScheduleAt = null,
@@ -64,7 +64,7 @@ class P2StatusServerTest {
             assertTrue(body.startsWith("{") && body.endsWith("}"))
             assertTrue(body.contains("\"chats\":7"))
             assertTrue(body.contains("\"schedules\":3"))
-            assertTrue(body.contains("\"appVersion\":\"0.9.5\""))
+            assertTrue(body.contains("\"appVersion\":\"0.9.6\""))
             assertTrue(body.contains("\"nextScheduleAt\":null"))
             assertTrue(body.contains("\"runningJobs\":1"))
             assertTrue(body.contains("\"interruptedJobs\":2"))

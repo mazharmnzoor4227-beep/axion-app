@@ -10,8 +10,8 @@ import kotlinx.serialization.json.JsonObject
 import java.io.File
 
 /**
- * The agent's hands on Axion's own browser (browser/BrowserController): a real WebView — JavaScript runs,
- * cookies and logins persist, pages render exactly as the user sees them in the Browser screen.
+ * The agent's hands on Axion's own browser (browser/BrowserController): the Obscura engine —
+ * JavaScript runs, cookies and logins persist, pages render exactly as the user sees them in the Browser screen.
  * browse_url stays the quick static read; these tools are for pages that need JS, forms, clicks or a login.
  */
 
@@ -41,7 +41,7 @@ private fun host(u: String) = runCatching { java.net.URI(u.trim()).host?.removeP
 class BrowserOpenTool : Tool {
     override val spec = ToolSpec(
         "browser_open",
-        "Open a URL in Axion's own browser (real WebView: JavaScript, cookies, logins). Returns the page title, its numbered elements and the readable text. Use it for JS-heavy pages, forms and anything browse_url cannot read.",
+        "Open a URL in Axion's browser (Obscura engine: JavaScript, cookies, logins). Returns the page title, its numbered elements and the readable text. Use it for JS-heavy pages, forms and anything browse_url cannot read.",
         schema { str("url", "Full URL (https://…) or a domain like example.com") },
     )
     override fun label(args: JsonObject) = StepLabel(StepKind.BROWSE, "Opening", host(args.s("url").orEmpty()))
@@ -50,7 +50,7 @@ class BrowserOpenTool : Tool {
         if (url.isBlank()) return ToolOutput("No URL", isError = true)
         return try {
             val b = browser()
-            val head = b.open(url)
+            val head = b.open(url, agent = true)
             val page = runCatching { b.read() }.getOrNull()
             ToolOutput(if (page != null) head + "\n\n" + formatPage(page, 6000) else head, doneTitle = "Opened page")
         } catch (e: Throwable) { ToolOutput("Browser error: ${e.message}", isError = true) }
@@ -148,7 +148,7 @@ class BrowserSearchTool : Tool {
         if (q.isBlank()) return ToolOutput("Empty query", isError = true)
         return try {
             val b = browser()
-            val head = b.search(q)
+            val head = b.search(q, agent = true)
             val page = runCatching { b.read() }.getOrNull()
             ToolOutput(if (page != null) head + "\n\n" + formatPage(page, 6000) else head, doneTitle = "Searched")
         } catch (e: Throwable) { ToolOutput("Browser error: ${e.message}", isError = true) }
@@ -191,7 +191,7 @@ class BrowserTabsTool : Tool {
         when (args.s("action")?.trim()?.lowercase()) {
             "list" -> ToolOutput("Browser tabs (${tabs.size}):\n${listText()}", doneTitle = "${tabs.size} tabs")
             "new" -> {
-                if (!b.newTab()) ToolOutput("Maximum 10 tabs are open — close one first.", isError = true)
+                if (!b.newTab(agent = true)) ToolOutput("Maximum 10 tabs are open — close one first.", isError = true)
                 else ToolOutput("Opened a new blank tab.\n${listText()}", doneTitle = "New tab")
             }
             "switch" -> {

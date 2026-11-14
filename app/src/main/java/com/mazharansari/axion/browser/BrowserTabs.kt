@@ -11,7 +11,8 @@ import java.util.UUID
  * that tab's page — the [BrowserController] keeps one WebView per tab, so the tab's
  * real page, cookies and login state survive the switch as well. The history list
  * here mirrors the WebView's own back/forward stack so the tab strip and the
- * agent can reason about it without touching a View.
+ * agent can reason about it without touching a View. 0.9.6: each tab also carries
+ * its engine ([BrowserEngineKind]) — the WebView, or Obscura for agent browsing.
  */
 data class BrowserTabState(
     val id: String,
@@ -19,6 +20,8 @@ data class BrowserTabState(
     val title: String = "",
     val history: List<String> = emptyList(),
     val historyIndex: Int = -1,
+    /** Which engine renders this tab: the built-in WebView, or Obscura (the agent's engine). */
+    val engine: BrowserEngineKind = BrowserEngineKind.WEBVIEW,
 ) {
     val canGoBack: Boolean get() = historyIndex > 0
     val canGoForward: Boolean get() = historyIndex >= 0 && historyIndex < history.lastIndex
@@ -56,13 +59,25 @@ class BrowserTabManager {
         if (i >= 0) _tabs[i] = tab
     }
 
-    /** Opens a new blank tab and makes it active. False when the tab limit is reached. */
-    fun newTab(): Boolean {
+    /** Opens a new blank tab with [engine] and makes it active. False when the tab limit is reached. */
+    fun newTab(engine: BrowserEngineKind = BrowserEngineKind.WEBVIEW): Boolean {
         if (_tabs.size >= MAX_TABS) return false
-        val tab = BrowserTabState(id = UUID.randomUUID().toString())
+        val tab = BrowserTabState(id = UUID.randomUUID().toString(), engine = engine)
         _tabs += tab
         _activeId = tab.id
         return true
+    }
+
+    /**
+     * Agent browsing always uses Obscura: a blank active tab converts to Obscura
+     * in place (same tab, same id), otherwise a new Obscura tab opens and becomes
+     * active. False only when the tab limit blocks that new tab.
+     */
+    fun ensureAgentObscuraTab(): Boolean {
+        val tab = active
+        if (tab.engine == BrowserEngineKind.OBSCURA) return true
+        if (tab.url.isBlank()) { replace(tab.copy(engine = BrowserEngineKind.OBSCURA)); return true }
+        return newTab(BrowserEngineKind.OBSCURA)
     }
 
     /** Switches to [id]. False when there is no such tab (the active tab is unchanged). */

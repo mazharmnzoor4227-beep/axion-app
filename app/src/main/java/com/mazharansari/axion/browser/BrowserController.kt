@@ -21,7 +21,11 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.mazharansari.axion.linux.LinuxHub
+import com.mazharansari.axion.linux.LinuxRuntime
 import com.mazharansari.axion.llm.Http
+import com.mazharansari.axion.mcp.McpServer
+import com.mazharansari.axion.mcp.StdioMcpClient
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,7 +50,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.FileOutputStream
-import java.net.URLEncoder
 import kotlin.coroutines.resume
 
 /** Lets agent tools reach the browser without threading it through every constructor (same pattern as LinuxHub). */
@@ -72,13 +75,34 @@ data class BrowserPage(val url: String, val title: String, val text: String, val
  * P1-7 (ME-9, ME-10): downloads are REAL — a page's download saves into the public Downloads/Axion folder
  * through DownloadManager, with progress in the Browser screen and an Open action — and <input type=file>
  * opens the system file picker (see [onFileChooserRequested] / [deliverFileChooserResult]).
+ *
+ * 0.9.6: each tab has an engine ([BrowserEngineKind]): the WebView ([WebViewEngine] below, the original
+ * behaviour, unchanged) or Obscura ([ObscuraEngine], the full browser engine the agent uses). The
+ * public operations route to the active tab's engine; the WebView machinery here is untouched.
  */
-class BrowserController(private val app: Application) {
+class BrowserController(
+    private val app: Application,
+    private val linuxProvider: () -> LinuxRuntime? = { LinuxHub.linux },
+) {
     private val mutex = Mutex()
     private val wrapper = MutableContextWrapper(app)
     private val tabManager = BrowserTabManager()
     private val views = LinkedHashMap<String, WebView>()
     private val json = Json { ignoreUnknownKeys = true }
+    private val webView = WebViewEngine()
+    /** The one shared Obscura engine: the MCP server is single-page-per-process, so every Obscura tab uses it. */
+    private var obscuraEngine: ObscuraEngine? = null
+    private val obscuraReadyMutex = Mutex()
+    private val obscuraScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _obscuraShot = MutableStateFlow<File?>(null)
+    /** The latest screenshot PNG for the active Obscura tab (the Browser screen shows it). */
+    val obscuraShot: StateFlow<File?> = _obscuraShot.asStateFlow()
+    private val _obscuraPage = MutableStateFlow<BrowserPage?>(null)
+    /** The last page read for the active Obscura tab (the Browser screen shows its text). */
+    val obscuraPage: StateFlow<BrowserPage?> = _obscuraPage.asStateFlow()
+    private val _installStatus = MutableStateFlow<String?>(null)
+    /** While Obscura installs, what it is doing ("Downloading Obscura… 12 of 66 MB"); null otherwise. */
+    val installStatus: StateFlow<String?> = _installStatus.asStateFlow()
 
     private val _url = MutableStateFlow(""); val url: StateFlow<String> = _url.asStateFlow()
     private val _title = MutableStateFlow(""); val title: StateFlow<String> = _title.asStateFlow()
@@ -210,6 +234,9 @@ class BrowserController(private val app: Application) {
     /** For the Browser screen: attach the ACTIVE tab's WebView to the visible activity. Main thread (Compose factory). */
     fun displayView(activityContext: Context): View {
         wrapper.baseContext = activityContext
+        // An Obscura tab has no WebView — the screen shows its screenshot view instead. This is only
+        // a safety net (the screen branches on the tab's engine first); never create a WebView for it.
+        if (tabManager.active.engine == BrowserEngineKind.OBSCURA) return View(wrapper)
         val view = ensureWv()
         (view.parent as? ViewGroup)?.removeView(view)
         return view
@@ -226,9 +253,13 @@ class BrowserController(private val app: Application) {
 
     // ---- tabs (P1-7) ----
 
-    /** Opens a new blank tab and makes it active. False when the tab limit is reached. */
-    suspend fun newTab(): Boolean = action {
-        if (!tabManager.newTab()) return@action false
+    /**
+     * Opens a new blank tab and makes it active. False when the tab limit is reached.
+     * The screen passes the engine the user picked; agent calls pass agent=true and
+     * always get an Obscura tab.
+     */
+    suspend fun newTab(engine: BrowserEngineKind = BrowserEngineKind.WEBVIEW, agent: Boolean = false): Boolean = action {
+        if (!tabManager.newTab(if (agent) BrowserEngineKind.OBSCURA else engine)) return@action false
         syncActiveFlows()
         true
     }
@@ -238,22 +269,27 @@ class BrowserController(private val app: Application) {
         if (!tabManager.switchTo(id)) return false
         loadDone?.complete(Unit)   // a load waiter for the old tab must not hang on the new tab
         syncActiveFlows()
+        if (tabManager.active.engine == BrowserEngineKind.OBSCURA) refreshObscuraViewAsync()
         return true
     }
 
     /** Closes [id] (closing the last tab resets it to a blank tab). False when there is no such tab. */
     suspend fun closeTab(id: String): Boolean = action {
         val single = tabManager.tabs.size == 1
+        val tab = tabManager.tabs.firstOrNull { it.id == id }
         val view = views[id]
         if (!tabManager.closeTab(id)) return@action false
-        if (view != null && !single) {
+        // Only a WebView tab owns a view. An Obscura tab has none; and a last tab
+        // reset to blank comes back as a WebView tab (the manager default).
+        if (view != null && tab?.engine == BrowserEngineKind.WEBVIEW && !single) {
             (view.parent as? ViewGroup)?.removeView(view)
             view.destroy()
             views.remove(id)
-        } else if (view != null) {
+        } else if (view != null && tab?.engine == BrowserEngineKind.WEBVIEW) {
             view.loadUrl("about:blank")
         }
         syncActiveFlows()
+        if (tabManager.active.engine == BrowserEngineKind.OBSCURA) refreshObscuraViewAsync()
         true
     }
 
@@ -366,7 +402,7 @@ class BrowserController(private val app: Application) {
     }
 
     private fun statusLine(prefix: String): String = buildString {
-        append(prefix).append(": ").append(_title.value.ifBlank { "(no title)" }).append(" — ").append(_url.value)
+        append(formatStatusLine(prefix, _title.value, _url.value))
         if (_loading.value) append("  [still loading — browser_read again in a moment]")
         lastError?.let { append("  [load note: $it]") }
         lastBlocked?.let { append("  [the page tried to open $it — outside links like that are not followed]") }
@@ -374,142 +410,325 @@ class BrowserController(private val app: Application) {
         lastDownloadError?.let { append("  [$it]") }
     }
 
-    private fun normalize(raw: String): String? {
-        val u = raw.trim()
-        if (u.isEmpty()) return null
-        if (u.startsWith("http://") || u.startsWith("https://")) return u
-        if (!u.contains('.') || u.contains(' ')) return null
-        return "https://$u"
-    }
-
     // ---- the operations (tools + screen share these; always the ACTIVE tab) ----
 
-    suspend fun open(rawUrl: String): String = action {
-        val u = normalize(rawUrl) ?: return@action "That does not look like a web address: \"$rawUrl\". Use browser_search for a search instead."
-        lastError = null; lastBlocked = null; lastDownloadName = null; lastDownloadError = null
-        loadDone = CompletableDeferred(); _loading.value = true
-        tabManager.navigate(u); syncTabFlows()
-        ensureWv().loadUrl(u)
-        awaitLoad(30_000)
-        statusLine("Opened")
-    }
+    /**
+     * Agent calls pass agent=true: agent browsing always uses Obscura tabs (a blank
+     * active WebView tab converts in place, otherwise a new Obscura tab opens).
+     * The screen's calls leave agent=false and use the tab's own engine.
+     */
+    suspend fun open(rawUrl: String, agent: Boolean = false): String =
+        runEngine(agent, ObscuraMove.NAVIGATE, true, { open(rawUrl) }, { open(rawUrl) })
 
     /** The screen's address bar: a URL opens, anything else searches. */
-    suspend fun openSmart(text: String): String {
-        val t = text.trim()
-        return if (normalize(t) != null) open(t) else search(t)
-    }
+    suspend fun openSmart(text: String): String =
+        runEngine(false, ObscuraMove.NAVIGATE, true, { openSmart(text) }, { openSmart(text) })
 
-    suspend fun search(query: String): String = action {
-        if (query.isBlank()) return@action "Empty search."
-        lastError = null; lastBlocked = null; lastDownloadName = null; lastDownloadError = null
-        loadDone = CompletableDeferred(); _loading.value = true
-        val searchUrl = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
-        tabManager.navigate(searchUrl); syncTabFlows()
-        ensureWv().loadUrl(searchUrl)
-        awaitLoad(30_000)
-        statusLine("Search results")
-    }
+    suspend fun search(query: String, agent: Boolean = false): String =
+        runEngine(agent, ObscuraMove.NAVIGATE, true, { search(query) }, { search(query) })
 
-    suspend fun read(): BrowserPage = action {
-        val o = eval(BrowserScripts.EXTRACT) ?: throw IllegalStateException("Nothing to read yet — open a page first (browser_open).")
-        val els = (o["elements"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { el ->
-            val e = el as? JsonObject ?: return@mapNotNull null
-            BrowserElement(
-                index = e["i"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null,
-                kind = e["kind"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                text = e["text"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                href = e["href"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                type = e["type"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                name = e["name"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                placeholder = e["ph"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-            )
-        }
-        BrowserPage(
-            url = o["url"]?.jsonPrimitive?.contentOrNull ?: _url.value,
-            title = o["title"]?.jsonPrimitive?.contentOrNull ?: _title.value,
-            text = o["text"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-            elements = els,
-        )
-    }
+    suspend fun read(): BrowserPage =
+        runEngine(false, ObscuraMove.MAYBE, false, { read() }, { read() })
 
-    suspend fun click(index: Int?, text: String?): String = action {
-        val js = BrowserScripts.CLICK
-            .replace("__IDX__", (index ?: -1).toString())
-            .replace("__TEXT_JSON__", JsonPrimitive(text?.trim()?.lowercase().orEmpty()).toString())
-        val o = eval(js) ?: return@action "Click failed — no page is open."
-        // kotlinx parses a JSON boolean as a JsonPrimitive whose content is "true"/"false"
-        if (o["ok"]?.jsonPrimitive?.contentOrNull != "true") return@action "Could not click: ${o["error"]?.jsonPrimitive?.contentOrNull ?: "unknown error"}"
-        delay(400)
-        awaitLoad(12_000)
-        statusLine("Clicked \"${o["text"]?.jsonPrimitive?.contentOrNull.orEmpty()}\"")
-    }
+    suspend fun click(index: Int?, text: String?): String =
+        runEngine(false, ObscuraMove.MAYBE, true, { click(index, text) }, { click(index, text) })
 
-    suspend fun type(index: Int, text: String, submit: Boolean): String = action {
-        val js = BrowserScripts.TYPE
-            .replace("__IDX__", index.toString())
-            .replace("__VALUE_JSON__", JsonPrimitive(text).toString())
-            .replace("__SUBMIT__", submit.toString())
-        val o = eval(js) ?: return@action "Typing failed — no page is open."
-        if (o["ok"]?.jsonPrimitive?.contentOrNull != "true") return@action "Could not type: ${o["error"]?.jsonPrimitive?.contentOrNull ?: "unknown error"}"
-        if (submit) { delay(400); awaitLoad(12_000); statusLine("Typed and submitted") }
-        else "Typed into the field."
-    }
+    suspend fun type(index: Int, text: String, submit: Boolean): String =
+        runEngine(false, ObscuraMove.MAYBE, submit, { type(index, text, submit) }, { type(index, text, submit) })
 
-    suspend fun scroll(down: Boolean, amountPx: Int?): String = action {
-        val view = ensureWv()
-        val dy = (amountPx ?: (view.height.takeIf { it > 0 } ?: 1200) * 85 / 100) * if (down) 1 else -1
-        val o = eval(BrowserScripts.SCROLL.replace("__DY__", dy.toString()))
-        val y = o?.get("y")?.jsonPrimitive?.contentOrNull ?: "?"
-        val max = o?.get("max")?.jsonPrimitive?.contentOrNull ?: "?"
-        if (y == max || (down && y == max)) "Scrolled — bottom of the page reached (position $y of $max)." else "Scrolled to position $y of $max."
-    }
+    suspend fun scroll(down: Boolean, amountPx: Int?): String =
+        runEngine(false, ObscuraMove.MAYBE, false, { scroll(down, amountPx) }, { scroll(down, amountPx) })
 
-    suspend fun back(): String = action {
-        val view = ensureWv()
-        if (!view.canGoBack()) return@action "No page to go back to."
-        loadDone = CompletableDeferred(); _loading.value = true
-        view.goBack()
-        tabManager.goBack()
-        awaitLoad(15_000)
-        statusLine("Back")
-    }
+    suspend fun back(): String =
+        runEngine(false, ObscuraMove.BACK, true, { back() }, { back() })
 
-    suspend fun forward(): String = action {
-        val view = ensureWv()
-        if (!view.canGoForward()) return@action "No page to go forward to."
-        loadDone = CompletableDeferred(); _loading.value = true
-        view.goForward()
-        tabManager.goForward()
-        awaitLoad(15_000)
-        statusLine("Forward")
-    }
+    suspend fun forward(): String =
+        runEngine(false, ObscuraMove.FORWARD, true, { forward() }, { forward() })
 
-    suspend fun reload(): String = action {
-        loadDone = CompletableDeferred(); _loading.value = true
-        ensureWv().reload(); awaitLoad(20_000)
-        statusLine("Reloaded")
-    }
+    suspend fun reload(): String =
+        runEngine(false, ObscuraMove.MAYBE, true, { reload() }, { reload() })
 
     fun stopLoading() {
         views[tabManager.activeId]?.stopLoading(); _loading.value = false; loadDone?.complete(Unit)
     }
 
     /** A picture of what the browser shows right now (the visible viewport), saved as a PNG. */
-    suspend fun screenshot(dir: File): File = action {
-        val view = ensureWv()
-        val w = view.width.takeIf { it > 0 } ?: 1080
-        val h = view.height.takeIf { it > 0 } ?: 1900
-        if (view.width == 0) {
-            view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
-            view.layout(0, 0, w, h)
+    suspend fun screenshot(dir: File): File =
+        runEngine(false, ObscuraMove.MAYBE, false, { screenshot(dir) }, { screenshot(dir) })
+
+    // ---- engine routing (0.9.6) ----
+
+    /** How an Obscura operation moves the active tab's history in the tab manager. */
+    private enum class ObscuraMove { NAVIGATE, BACK, FORWARD, MAYBE }
+
+    /**
+     * Runs one operation on the active tab's engine: WebView work on the main
+     * thread, Obscura work on IO (the MCP stdio calls block). Agent calls first
+     * make sure the agent has an Obscura tab. After an Obscura operation the
+     * tab record and the shared flows follow the engine's page, and the Browser
+     * screen's Obscura view refreshes when the page may have changed.
+     */
+    private suspend fun <T> runEngine(
+        agent: Boolean,
+        move: ObscuraMove,
+        refreshView: Boolean,
+        obscuraBlock: suspend ObscuraEngine.() -> T,
+        webBlock: suspend WebViewEngine.() -> T,
+    ): T = mutex.withLock {
+        if (agent && !ensureAgentTabLocked()) error("Maximum 10 tabs are open — close one first.")
+        if (tabManager.active.engine == BrowserEngineKind.OBSCURA) {
+            withContext(Dispatchers.IO) {
+                ensureObscuraReady()
+                val engine = obscuraEngine ?: error("Obscura engine is not ready.")
+                val result = engine.obscuraBlock()
+                syncObscuraTab(move)
+                if (refreshView) refreshObscuraViewAsync()
+                result
+            }
+        } else {
+            withContext(Dispatchers.Main) { webView.webBlock() }
         }
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp); canvas.drawColor(Color.WHITE); view.draw(canvas)
-        dir.mkdirs()
-        val f = File(dir, "browser-${System.currentTimeMillis()}.png")
-        FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        bmp.recycle()
-        f
+    }
+
+    /**
+     * Agent browsing always uses Obscura: converts a blank active WebView tab
+     * in place (its WebView, if the screen ever created one, is destroyed on
+     * the main thread), otherwise opens a new Obscura tab. False only when the
+     * tab limit blocks that new tab. Runs under the controller mutex.
+     */
+    private suspend fun ensureAgentTabLocked(): Boolean {
+        val tab = tabManager.active
+        if (tab.engine == BrowserEngineKind.OBSCURA) return true
+        val convertingBlank = tab.url.isBlank()
+        if (!tabManager.ensureAgentObscuraTab()) return false
+        if (convertingBlank) {
+            views.remove(tab.id)?.let { v -> withContext(Dispatchers.Main) { (v.parent as? ViewGroup)?.removeView(v); v.destroy() } }
+        }
+        syncActiveFlows()
+        return true
+    }
+
+    /**
+     * Makes the shared Obscura engine ready: installs Obscura first (download,
+     * checksum, unpack — once, skipped by the version marker), then starts its
+     * MCP server. Loud when Linux is missing or the install fails; never falls
+     * back to the WebView for agent work.
+     */
+    private suspend fun ensureObscuraReady() = obscuraReadyMutex.withLock {
+        if (obscuraEngine != null) return@withLock
+        val rt = linuxProvider() ?: error("Linux is not installed yet — install it in Developer tools first.")
+        if (!rt.isInstalled()) error("Linux is not installed yet — install it in Developer tools first.")
+        _installStatus.value = "Getting Obscura ready…"
+        try {
+            ObscuraInstaller.ensureInstalled(rt) { msg -> _installStatus.value = msg }
+            val dir = File(app.filesDir, "obscura").apply { mkdirs() }
+            val server = McpServer(id = "obscura", name = "Obscura", url = "", transport = "stdio", command = "obscura mcp")
+            obscuraEngine = ObscuraEngine(
+                StdioMcpClient(server, rt, dir),
+                checkReady = {
+                    if (!rt.isInstalled()) error("Linux is not installed yet — install it in Developer tools first.")
+                    if (!ObscuraInstaller.isInstalled(rt.rootfs)) error("Obscura is not installed — open the browser and choose Obscura to install it.")
+                },
+            )
+        } finally {
+            _installStatus.value = null
+        }
+    }
+
+    /**
+     * After an Obscura operation, mirrors the engine's page in the active tab's
+     * record (URL, title, history) and in the shared flows, so the tab strip,
+     * the address bar and the Browser screen all follow the Obscura page.
+     */
+    private fun syncObscuraTab(move: ObscuraMove) {
+        val engine = obscuraEngine ?: return
+        val tab = tabManager.active
+        when (move) {
+            ObscuraMove.NAVIGATE -> if (engine.currentUrl.isNotBlank()) tabManager.navigate(engine.currentUrl)
+            ObscuraMove.BACK -> tabManager.goBack()
+            ObscuraMove.FORWARD -> tabManager.goForward()
+            ObscuraMove.MAYBE -> {
+                val u = engine.currentUrl
+                if (u.isNotBlank() && u != tab.url) tabManager.navigate(u)
+            }
+        }
+        if (engine.currentUrl.isNotBlank()) tabManager.updateActive(engine.currentUrl, engine.currentTitle)
+        val now = tabManager.active
+        _url.value = now.url.ifBlank { engine.currentUrl }
+        _title.value = now.title.ifBlank { engine.currentTitle }
+        _loading.value = false
+        _canBack.value = now.canGoBack
+        _canForward.value = now.canGoForward
+        _obscuraPage.value = engine.lastPage
+        _obscuraShot.value = engine.lastScreenshot
+        syncTabFlows()
+    }
+
+    private fun refreshObscuraViewAsync() {
+        obscuraScope.launch { refreshObscuraView() }
+    }
+
+    /**
+     * Refreshes the Browser screen's Obscura view (screenshot + readable text)
+     * for the active Obscura tab. Never throws: a failed refresh leaves the
+     * previous content. When the tab's recorded page is not the page the shared
+     * engine is showing (the engine holds one page; switching tabs moves it),
+     * the engine navigates back to this tab's page first. A blank tab shows
+     * nothing yet — its empty state, not an error.
+     */
+    suspend fun refreshObscuraView() {
+        val tabId = tabManager.activeId
+        val tab = tabManager.active
+        if (tab.engine != BrowserEngineKind.OBSCURA) return
+        if (tab.url.isBlank()) { _obscuraPage.value = null; _obscuraShot.value = null; return }
+        // The engine's MCP calls block their thread (stdio polling), so all of
+        // this runs on IO even when the Browser screen calls it from the main thread.
+        withContext(Dispatchers.IO) {
+            if (!runCatching { ensureObscuraReady() }.isSuccess) return@withContext
+            val engine = obscuraEngine ?: return@withContext
+            if (tabManager.activeId != tabId) return@withContext
+            if (engine.currentUrl != tab.url) runCatching { engine.open(tab.url) }
+            if (tabManager.activeId != tabId) return@withContext
+            val shotDir = File(app.filesDir, "obscura-shots").apply { mkdirs() }
+            runCatching { engine.screenshot(shotDir) }
+            runCatching { engine.read() }
+            if (tabManager.activeId != tabId) return@withContext
+            _obscuraShot.value = engine.lastScreenshot
+            _obscuraPage.value = engine.lastPage
+            syncObscuraTab(ObscuraMove.MAYBE)
+        }
+    }
+
+    // ---- the WebView engine: the original operations, moved here unchanged ----
+
+    /**
+     * The WebView engine: one WebView per tab, JavaScript in the page, the same
+     * status lines the tools always returned. It runs on the main thread (WebViews
+     * demand it) and only ever touches the active tab. [BrowserController] routes
+     * to it when the active tab's engine is [BrowserEngineKind.WEBVIEW].
+     */
+    inner class WebViewEngine : BrowserEngine {
+        override suspend fun open(url: String): String {
+            val u = normalizeUrl(url) ?: return "That does not look like a web address: \"$url\". Use browser_search for a search instead."
+            lastError = null; lastBlocked = null; lastDownloadName = null; lastDownloadError = null
+            loadDone = CompletableDeferred(); _loading.value = true
+            tabManager.navigate(u); syncTabFlows()
+            ensureWv().loadUrl(u)
+            awaitLoad(30_000)
+            return statusLine("Opened")
+        }
+
+        override suspend fun openSmart(text: String): String {
+            val t = text.trim()
+            return if (normalizeUrl(t) != null) open(t) else search(t)
+        }
+
+        override suspend fun search(query: String): String {
+            if (query.isBlank()) return "Empty search."
+            lastError = null; lastBlocked = null; lastDownloadName = null; lastDownloadError = null
+            loadDone = CompletableDeferred(); _loading.value = true
+            val searchUrl = duckDuckGoUrl(query)
+            tabManager.navigate(searchUrl); syncTabFlows()
+            ensureWv().loadUrl(searchUrl)
+            awaitLoad(30_000)
+            return statusLine("Search results")
+        }
+
+        override suspend fun read(): BrowserPage {
+            val o = eval(BrowserScripts.EXTRACT) ?: throw IllegalStateException("Nothing to read yet — open a page first (browser_open).")
+            val els = (o["elements"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { el ->
+                val e = el as? JsonObject ?: return@mapNotNull null
+                BrowserElement(
+                    index = e["i"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null,
+                    kind = e["kind"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    text = e["text"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    href = e["href"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    type = e["type"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    name = e["name"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    placeholder = e["ph"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                )
+            }
+            return BrowserPage(
+                url = o["url"]?.jsonPrimitive?.contentOrNull ?: _url.value,
+                title = o["title"]?.jsonPrimitive?.contentOrNull ?: _title.value,
+                text = o["text"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                elements = els,
+            )
+        }
+
+        override suspend fun click(index: Int?, text: String?): String {
+            val js = BrowserScripts.CLICK
+                .replace("__IDX__", (index ?: -1).toString())
+                .replace("__TEXT_JSON__", JsonPrimitive(text?.trim()?.lowercase().orEmpty()).toString())
+            val o = eval(js) ?: return "Click failed — no page is open."
+            // kotlinx parses a JSON boolean as a JsonPrimitive whose content is "true"/"false"
+            if (o["ok"]?.jsonPrimitive?.contentOrNull != "true") return "Could not click: ${o["error"]?.jsonPrimitive?.contentOrNull ?: "unknown error"}"
+            delay(400)
+            awaitLoad(12_000)
+            return statusLine("Clicked \"${o["text"]?.jsonPrimitive?.contentOrNull.orEmpty()}\"")
+        }
+
+        override suspend fun type(index: Int, text: String, submit: Boolean): String {
+            val js = BrowserScripts.TYPE
+                .replace("__IDX__", index.toString())
+                .replace("__VALUE_JSON__", JsonPrimitive(text).toString())
+                .replace("__SUBMIT__", submit.toString())
+            val o = eval(js) ?: return "Typing failed — no page is open."
+            if (o["ok"]?.jsonPrimitive?.contentOrNull != "true") return "Could not type: ${o["error"]?.jsonPrimitive?.contentOrNull ?: "unknown error"}"
+            if (submit) { delay(400); awaitLoad(12_000); return statusLine("Typed and submitted") }
+            return "Typed into the field."
+        }
+
+        override suspend fun scroll(down: Boolean, amountPx: Int?): String {
+            val view = ensureWv()
+            val dy = (amountPx ?: (view.height.takeIf { it > 0 } ?: 1200) * 85 / 100) * if (down) 1 else -1
+            val o = eval(BrowserScripts.SCROLL.replace("__DY__", dy.toString()))
+            val y = o?.get("y")?.jsonPrimitive?.contentOrNull ?: "?"
+            val max = o?.get("max")?.jsonPrimitive?.contentOrNull ?: "?"
+            return if (y == max || (down && y == max)) "Scrolled — bottom of the page reached (position $y of $max)." else "Scrolled to position $y of $max."
+        }
+
+        override suspend fun back(): String {
+            val view = ensureWv()
+            if (!view.canGoBack()) return "No page to go back to."
+            loadDone = CompletableDeferred(); _loading.value = true
+            view.goBack()
+            tabManager.goBack()
+            awaitLoad(15_000)
+            return statusLine("Back")
+        }
+
+        override suspend fun forward(): String {
+            val view = ensureWv()
+            if (!view.canGoForward()) return "No page to go forward to."
+            loadDone = CompletableDeferred(); _loading.value = true
+            view.goForward()
+            tabManager.goForward()
+            awaitLoad(15_000)
+            return statusLine("Forward")
+        }
+
+        override suspend fun reload(): String {
+            loadDone = CompletableDeferred(); _loading.value = true
+            ensureWv().reload(); awaitLoad(20_000)
+            return statusLine("Reloaded")
+        }
+
+        override suspend fun screenshot(dir: File): File {
+            val view = ensureWv()
+            val w = view.width.takeIf { it > 0 } ?: 1080
+            val h = view.height.takeIf { it > 0 } ?: 1900
+            if (view.width == 0) {
+                view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+                view.layout(0, 0, w, h)
+            }
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp); canvas.drawColor(Color.WHITE); view.draw(canvas)
+            dir.mkdirs()
+            val f = File(dir, "browser-${System.currentTimeMillis()}.png")
+            FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bmp.recycle()
+            return f
+        }
     }
 }

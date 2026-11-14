@@ -1,4 +1,4 @@
-name: Release Build (v0.9.5)
+name: Release Build (v0.9.6)
 on:
   push:
     branches: [main]
@@ -33,4 +33,4 @@ jobs:
         with:
           name: axion-release-unsigned
           path: app/build/outputs/apk/release/app-release-unsigned.apk
-# v0.9.5 release: all 36 roadmap items + composer chips fix (unit tests are gated by verify-targeted.yml on the same push)
+# v0.9.6 release: Obscura browser engine (agent default) + WebView/Obscura tab picker (unit tests are gated by verify-targeted.yml on the same push)

@@ -79,6 +79,14 @@ data class McpServer(
 interface McpRpc {
     fun listTools(): List<JsonObject>
     fun call(name: String, args: JsonObject): Pair<String, Boolean>
+    /**
+     * The raw tools/call result (the full "result" JSON object). [call] maps image
+     * content to a "[image …]" placeholder and drops the bytes — callers that need
+     * them (Obscura screenshots) use this instead. Clients that cannot return raw
+     * results keep the default, which fails loudly.
+     */
+    fun callRaw(name: String, args: JsonObject): JsonObject =
+        error("This MCP client does not return raw tool results.")
     fun listResources(): List<JsonObject>
     fun readResource(uri: String): String
     fun listPrompts(): List<JsonObject>
@@ -144,6 +152,11 @@ class McpClient(private val server: McpServer) : McpRpc {
             }
         } ?: res.toString()
         return text to (res["isError"]?.jsonPrimitive?.booleanOrNull == true)
+    }
+
+    override fun callRaw(name: String, args: JsonObject): JsonObject {
+        ensureInit()
+        return rpc("tools/call", buildJsonObject { put("name", name); put("arguments", args) })
     }
 
     override fun listResources(): List<JsonObject> { ensureInit(); return rpc("resources/list")["resources"]?.jsonArray?.map { it.jsonObject }.orEmpty() }
@@ -282,6 +295,9 @@ class StdioMcpClient(private val server: McpServer, private val linux: LinuxRunt
         } ?: res.toString()
         return text to (res["isError"]?.jsonPrimitive?.booleanOrNull == true)
     }
+
+    override fun callRaw(name: String, args: JsonObject): JsonObject =
+        rpc("tools/call", buildJsonObject { put("name", name); put("arguments", args) })
 
     override fun listResources(): List<JsonObject> = rpc("resources/list")["resources"]?.jsonArray?.map { it.jsonObject }.orEmpty()
 

@@ -137,7 +137,7 @@ class Graph(val app: Application) {
     val jobRecords by lazy { com.mazharansari.axion.data.JobRecordStore(File(app.filesDir, "job-records")) }
     // v0.9 — Axion's own browser (one shared WebView for the Browser screen + the agent) and the terminal:
     // one persistent shell session + background jobs, both on the same PRoot Ubuntu.
-    val browser by lazy { com.mazharansari.axion.browser.BrowserController(app) }
+    val browser by lazy { com.mazharansari.axion.browser.BrowserController(app) { linux } }
     val shell by lazy { com.mazharansari.axion.linux.ShellSession(linux) }
     val jobs by lazy { com.mazharansari.axion.linux.BackgroundJobs(app, linux, jobRecords) }
     val agy by lazy { com.mazharansari.axion.antigravity.AgyAccounts(app) }
