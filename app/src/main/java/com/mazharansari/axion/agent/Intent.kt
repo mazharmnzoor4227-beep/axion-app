@@ -105,6 +105,11 @@ object IntentGate {
         "memory_add", "memory_replace", "memory_remove", "memory_read", "session_search",
         // v0.11: deep research is a chat request too ("is par research karke batao") — not just an ACTION verb.
         "deep_research",
+        // v0.9.7 (Swarm Phase 1): fanning out to parallel workers is a chat request too ("is ke teen hisse alag alag
+        // bots ko de do") — the swarm tool and its single-angle sibling must stay in the lookup list, or the
+        // catalog-vs-gate invariant (UnifiedToolsTest.catalogAndGateWebListsMatch) breaks and the tools silently
+        // vanish from chat.
+        "subagent_research", "subagent_swarm",
         // v0.12: scheduling is conversational too ("kal 9 baje yaad dilana…", "roz sham ko…") — it must
         // work in plain chat, not only in ACTION turns.
         "schedule_create", "schedule_list", "schedule_delete",
