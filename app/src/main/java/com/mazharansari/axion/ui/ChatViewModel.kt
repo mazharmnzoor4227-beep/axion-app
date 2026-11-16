@@ -25,6 +25,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val g = (app as AxionApp).graph
 
     var conversationId by mutableStateOf<String?>(null); private set
+    /** Swarm (Phase 1): the open conversation is a worker transcript — read-only, with a way back to its parent chat. */
+    var viewingWorkerTranscript by mutableStateOf(false); private set
+    private var workerReturnToId: String? = null
+    /** Bot Store (Phase 1): the parent bot's given name when returning from a worker chat. */
+    private var workerReturnToName: String? = null
+    /** Bot Store (Phase 1): the bot this chat runs as (installed/created bot); null = plain Axion. Any bot can spawn workers; the name is what makes it the parent for its run. */
+    var activeBot by mutableStateOf<com.mazharansari.axion.data.BotDefinition?>(null); private set
     var title by mutableStateOf("")
     var messages by mutableStateOf<List<Message>>(emptyList()); private set
     var running by mutableStateOf(false); private set
@@ -155,10 +162,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun newChat(into: Section = section) {
         // v0.8.0: no stop() — a run in the chat being left keeps working in the background.
         conversationId = null; title = ""; messages = emptyList(); pending.clear(); draft = ""; section = into
+        viewingWorkerTranscript = false; workerReturnToId = null; workerReturnToName = null; activeBot = null
         contextUsage = null   // P2-2: the indicator belongs to the conversation just left
         if (into != Section.BUILD) projectId = null
         refreshRunning()
     }
+
+    /**
+     * Bot Store (Phase 1): start a chat AS an installed/created bot — its name, persona and
+     * tool allow-list drive the run (see runAgent). The user types first; installing a bot
+     * never auto-runs it.
+     */
+    fun startBotChat(bot: com.mazharansari.axion.data.BotDefinition) {
+        newChat(Section.ASK)
+        activeBot = bot
+    }
+
+    /** Leave a bot chat: the next run is plain Axion again. */
+    fun exitBot() { activeBot = null }
 
     // ── v0.5 Build projects ────────────────────────────────────────────────────────────────────────────────────────
     /** The Build project whose chat is open (null = no project). Build turns run inside its folder. */
@@ -279,6 +300,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             opening = null
             conversationId = sess.convId; title = sess.title; messages = sess.msgs; createdAt = sess.createdAt
             section = sess.section
+            viewingWorkerTranscript = false
+            // Opening a saved chat is a plain Axion chat — a bot run is (re)started from the Bots section.
+            activeBot = null
             projectId = if (sess.section == Section.BUILD) sess.ownerId else null
             undoAvailable = projectId?.let { undoPoints.containsKey(it) } == true
             pendingReview = null; projectId?.let { pid -> g.build.store.get(pid)?.let { loadPending(it) } }   // axion-p1.2
@@ -291,12 +315,35 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             opening = null
             conversationId = c.id; title = c.title; messages = c.messages; createdAt = c.createdAt
             section = Section.of(c.section)
+            // A worker transcript (section "worker") opens read-only; a normal chat clears it.
+            viewingWorkerTranscript = c.section == "worker"
+            // Opening a saved chat is a plain Axion chat — a bot run is (re)started from the Bots section.
+            activeBot = null
             projectId = if (section == Section.BUILD) g.build.store.projectFor(c.id)?.id else null
             undoAvailable = projectId?.let { undoPoints.containsKey(it) } == true
             pendingReview = null; projectId?.let { id -> g.build.store.get(id)?.let { loadPending(it) } }   // axion-p1.2
             refreshRunning()
         }
     }
+
+    /**
+     * Swarm (Phase 1): open a worker's own chat — its full transcript (brief, each step,
+     * result). The parent chat it came from is remembered, so Back returns to it.
+     */
+    fun openWorkerChat(workerConversationId: String, parentConversationId: String?, parentName: String? = null) {
+        workerReturnToId = parentConversationId; workerReturnToName = parentName
+        open(workerConversationId)
+    }
+
+    /** Leave a worker transcript: back to its parent chat, or a fresh chat when the parent is gone. */
+    fun closeWorkerChat() {
+        val back = workerReturnToId
+        workerReturnToId = null; workerReturnToName = null; viewingWorkerTranscript = false
+        if (back != null) open(back) else newChat(Section.ASK)
+    }
+
+    /** The parent bot's given name for the read-only banner above a worker transcript ("" = plain Axion). */
+    fun workerParentName(): String = workerReturnToName.orEmpty()
 
     fun addAttachment(uri: Uri) = viewModelScope.launch(Dispatchers.IO) {
         val cr = getApplication<Application>().contentResolver
@@ -339,6 +386,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     internal val maxInlineChars = 60_000
 
     fun send(textIn: String = draft) {
+        if (viewingWorkerTranscript) return   // a worker transcript is read-only
         var text = textIn.trim()
         if ((text.isEmpty() && pending.isEmpty()) || running) return
         if (section == Section.BUILD && pendingReview != null) { toast = "Review the waiting changes first — Approve or Reject."; reviewRequested++; return }   // axion-p1.2
@@ -379,17 +427,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun regenerate() {
-        if (running) return
+        if (running || viewingWorkerTranscript) return
         val lastUser = messages.indexOfLast { it.role == Role.USER }
         if (lastUser < 0) return
         messages = messages.subList(0, lastUser + 1)
         runAgent()
     }
 
-    fun rate(id: String, r: Int) { messages = messages.map { if (it.id == id) it.copy(rating = if (it.rating == r) 0 else r) else it }; persist(true) }
+    fun rate(id: String, r: Int) { if (viewingWorkerTranscript) return; messages = messages.map { if (it.id == id) it.copy(rating = if (it.rating == r) 0 else r) else it }; persist(true) }
 
     fun editAndResend(id: String) {
-        val i = messages.indexOfFirst { it.id == id }; if (i < 0 || running) return
+        val i = messages.indexOfFirst { it.id == id }; if (i < 0 || running || viewingWorkerTranscript) return
         draft = messages[i].text; messages = messages.subList(0, i); persist(true)
     }
 
@@ -419,6 +467,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         refreshRunning()
         sess.job?.cancel()
         g.speaker.stop()
+        g.bots.parentFinished("run-${sess.aid}", BotStatus.FAILED, "Stopped")
         persist(sess, immediate = true)
     }
 
@@ -521,10 +570,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         sendTappedAt = 0
         var requestAt = 0L; var firstAt = 0L
         sess.job = viewModelScope.launch {
+            // Bot Store (Phase 1): the bot this run answers as, captured at send time — its
+            // given name is the parent bot's name for this run ("Axion" when no bot is active).
+            val bot = activeBot
+            val botName = bot?.name ?: s.assistantName.ifBlank { "Axion" }
             // v0.8.0 (Phase C): register this run so WorkService keeps the process alive in the
             // background and the projects list / chat drawer can show it as Working.
             g.runs.register("run-$aid", sess.kind, sess.ownerId, sess.title.ifBlank { "Working" }, coroutineContext[kotlinx.coroutines.Job]!!, started)
             com.mazharansari.axion.work.WorkService.refresh(getApplication())   // the notification now lists this run too
+            // Swarm (Phase 1): the parent bot's card appears in the Bots section the moment the run starts.
+            g.bots.registerParent("run-$aid", convId, botName, sess.title)
+            var lastWorkerCount = -1   // last worker count shown in the run title
             if (longTaskOn) g.taskRuns.start(u.text, convId)   // v0.12: survives an app kill; see interruptedTask
             // UI ticker: at most ~16 updates/s however fast tokens arrive, so long answers never jank the list.
             val ticker = launch { while (isActive) { delay(45); flush(sess) } }   // v0.4: ~22 UI updates/s while streaming
@@ -541,6 +597,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         if (i >= 0) buf.steps[i] = step else buf.steps += step
                         buf.roundStart = buf.text.length; buf.dirty = true
                     }
+                    // Swarm (Phase 1): the parent card counts its own steps; a WORKER step re-titles
+                    // the run with the live worker count, so the foreground notification shows
+                    // the swarm ("… · 3 workers") while it works in the background.
+                    if (step.kind == StepKind.WORKER) {
+                        val n = g.bots.liveWorkerCount(convId)
+                        if (n != lastWorkerCount) {
+                            lastWorkerCount = n
+                            g.runs.updateTitle("run-$aid", if (n > 0) "${sess.title.ifBlank { "Working" }} · $n worker${if (n == 1) "" else "s"}" else sess.title.ifBlank { "Working" })
+                            com.mazharansari.axion.work.WorkService.refresh(getApplication())
+                        }
+                    } else g.bots.parentStep("run-$aid")
                     if (longTaskOn && step.status != StepStatus.RUNNING)
                         g.taskRuns.progress(synchronized(buf) { buf.steps.count { it.status != StepStatus.RUNNING } })   // v0.12
                 }
@@ -576,12 +643,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         // instead of answering chat-only. The final answer streams through the sink.
                         sink.text(runLocalToolTurn(history, userItem, sink))
                     } else {
-                        Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn,
+                        Agent(g.workspace, g.skills, baseTools = Agent.defaultTools() + GenerateImageTool(g.imageGen), extraTools = { g.mcp.tools() }, toolSwitches = { bot?.let { com.mazharansari.axion.data.switchesForBot(it) } ?: g.settings.state.value.toolSwitches }, memory = g.memory, conversations = g.chats, researchMode = researchOn,
                             approvals = g.approvals, approver = approver, longTask = longTaskOn, turbo = turboOn, schedules = g.schedules, appCtx = getApplication(),
                             contextBudget = ctxBudget, onContextUsage = { u -> viewModelScope.launch(Dispatchers.Main.immediate) { contextUsage = u } }).run(
-                            history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }) }, sink = sink,
-                            profile = Profile(s.assistantName.ifBlank { "Axion" }, s.userName, s.replyLanguage, s.instructions),
+                            history, userItem, attempts = { if (sec == Section.BUILD) buildAttempts() else com.mazharansari.axion.data.preferProvider(attempts(runMode, quick, onFreeWait = { secs -> freeWaitNotice(buf, secs) }), bot?.suggestedProvider) }, sink = sink,
+                            profile = Profile(botName, s.userName, s.replyLanguage, s.instructions),
                             intent = if (sec == Section.BUILD) com.mazharansari.axion.agent.Intent.CHAT else intent,   // agy brings its own tools
+                            swarmParentId = convId, fastAttempts = { attempts(Mode.FAST, quick) },
+                            systemExtra = bot?.promptBlock(),
                         )
                     }
                 }
@@ -590,7 +659,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             catch (e: LlmException) { status = MsgStatus.ERROR; error = friendly(e) }
             catch (e: Throwable) { status = MsgStatus.ERROR; error = e.message ?: e.toString() }
             ticker.cancel()
-            if (buf.closed) { if (longTaskOn) g.taskRuns.finish("interrupted"); sessions.remove(convId); refreshRunning(); return@launch }   // Stop already froze this reply into its own conversation
+            if (buf.closed) { g.bots.parentFinished("run-$aid", BotStatus.FAILED, "Stopped"); if (longTaskOn) g.taskRuns.finish("interrupted"); sessions.remove(convId); refreshRunning(); return@launch }   // Stop already froze this reply into its own conversation
             withContext(NonCancellable) {
                 buf.dirty = true; flush(sess)
                 sess.msgs = sess.msgs.map {
@@ -601,6 +670,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     else it
                 }
                 if (conversationId == convId) messages = sess.msgs
+                g.bots.parentFinished("run-$aid", if (status == MsgStatus.DONE) BotStatus.DONE else BotStatus.FAILED,
+                    sess.msgs.firstOrNull { it.id == aid }?.text.orEmpty().take(120))
                 sessions.remove(convId)
                 refreshRunning()
                 if (requestAt > 0) lastTiming = (requestAt - tapped) to (if (firstAt > 0) firstAt - tapped else -1L)
