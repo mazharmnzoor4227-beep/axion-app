@@ -49,6 +49,24 @@ class ToolContext(
      * on-device Linux is used exactly as before.
      */
     val turbo: Boolean = false,
+    /**
+     * Swarm (Phase 1): live updates from worker runs — one card per worker in the chat.
+     * The agent wires it to the step sink; surfaces without a UI leave the default (no-op).
+     */
+    val onWorker: (WorkerUpdate) -> Unit = {},
+    /** Swarm (Phase 1): the CEO conversation id — links every worker update to its CEO run in the Bots section. */
+    val swarmParentId: String? = null,
+    /**
+     * Brain (Phase 1): per-worker model routing — "fast" for cheap, single-purpose steps
+     * (research, tests), "strong" for the hard ones (coding, reviewing). The agent wires it
+     * to the ranked attempts; a worker whose hint has no route falls back to [ask].
+     */
+    val askWith: (suspend (hint: String, prompt: String) -> String)? = null,
+    /**
+     * Swarm (Phase 1): a worker's step note, keyed by worker task id — promotes its card
+     * STARTING → WORKING and appends the line to its transcript. No-op without a UI.
+     */
+    val onWorkerProgress: (workerId: String, stepsUsed: Int, note: String) -> Unit = { _, _, _ -> },
     /** Live output for long commands (shown in the open Bash card). Kept LAST: call sites pass it as a trailing lambda. */
     val progress: (String) -> Unit = {},
 )
