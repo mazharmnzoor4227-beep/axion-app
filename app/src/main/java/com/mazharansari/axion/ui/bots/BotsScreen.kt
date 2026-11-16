@@ -276,7 +276,7 @@ private fun BotDefCard(def: BotDefinition, onStart: () -> Unit, onRemove: () -> 
 private fun LogoPickerSheet(def: BotDefinition, onPickBuiltin: (String) -> Unit, onPickGallery: () -> Unit, onClear: () -> Unit, onDismiss: () -> Unit) {
     val p = P
     val current = com.mazharansari.axion.data.BotLogo.parse(def.logo)
-    com.mazharansari.axion.ui.components.AxionSheet(onDismiss) {
+    com.mazharansari.axion.ui.chat.AxionSheet(onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
             Text("Logo for ${def.name}", style = com.mazharansari.axion.ui.theme.Type.title, color = p.text)
             Spacer(Modifier.height(14.dp))

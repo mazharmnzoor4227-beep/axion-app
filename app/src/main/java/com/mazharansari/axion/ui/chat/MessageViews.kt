@@ -55,7 +55,7 @@ import java.io.File
 fun UserBubble(m: Message, onLongPress: () -> Unit = {}) {
     val p = P
     // Phase 2: a pasted or model-echoed message that arrives URL-encoded renders decoded.
-    val text = remember(m.text) { decodeIfEncoded(m.text) }
+    val text = remember(m.text) { MessageText.decodeIfEncoded(m.text) }
     Column(Modifier.fillMaxWidth().padding(start = 64.dp, end = 12.dp, top = 10.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
         if (m.attachments.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -144,7 +144,7 @@ fun AssistantMessage(
     val streaming = m.status == MsgStatus.STREAMING
     // Phase 2: decode before anything else — a URL-encoded answer renders as its text,
     // and the Sources extraction runs on the decoded text too.
-    val text = remember(m.text) { decodeIfEncoded(m.text) }
+    val text = remember(m.text) { MessageText.decodeIfEncoded(m.text) }
     // v0.3.1: Axion's reply column is 12 dp from each screen edge (measured), not 16.
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         if (m.plan.isNotEmpty()) { PlanCard(m.plan); Spacer(Modifier.height(10.dp)) }   // axion-p2

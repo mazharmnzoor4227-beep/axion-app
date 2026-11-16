@@ -981,7 +981,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun speak(m: Message) {
         if (g.speaker.speakingId.value == m.id) { g.speaker.stop(); return }
         // Phase 2: read aloud the decoded text — never raw %XX escapes.
-        g.speaker.speak(m.id, com.mazharansari.axion.ui.chat.decodeIfEncoded(m.text))
+        g.speaker.speak(m.id, com.mazharansari.axion.ui.chat.MessageText.decodeIfEncoded(m.text))
     }
 
     /** One spoken turn of the Live call ("same voice" mode): a short spoken answer, web search allowed, fast models first. */

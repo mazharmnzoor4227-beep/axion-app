@@ -106,7 +106,7 @@ fun Markdown(text: String, modifier: Modifier = Modifier) {
     // Phase 2: a model/tool answer that arrives URL-encoded (the "%27%29%0A…" garbage
     // from the 2026-11-16 screenshot) is decoded before parsing, so it renders as
     // the text it was — never as raw percent-escapes.
-    val decoded = remember(text) { com.mazharansari.axion.ui.chat.decodeIfEncoded(text) }
+    val decoded = remember(text) { com.mazharansari.axion.ui.chat.MessageText.decodeIfEncoded(text) }
     val blocks = remember(decoded) { MdParser.parse(decoded) }
     // Axion spaces blocks 12 dp apart (bullet pitch 36 dp = 24 sp line + 12).
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {

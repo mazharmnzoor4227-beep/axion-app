@@ -317,10 +317,10 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                         else AssistantMessage(
                             m, isLast = m.id == messages.last().id, speaking = speakingId == m.id,
                             onOpenThoughts = { thoughts = m.id },
-                            onCopy = { vm.toast = if (com.mazharansari.axion.security.SecureClipboard.copy(ctx, "Axion", decodeIfEncoded(m.text))) "Copied — it has a key in it, so the clipboard clears in 45 s" else "Copied" },
+                            onCopy = { vm.toast = if (com.mazharansari.axion.security.SecureClipboard.copy(ctx, "Axion", com.mazharansari.axion.ui.chat.MessageText.decodeIfEncoded(m.text))) "Copied — it has a key in it, so the clipboard clears in 45 s" else "Copied" },
                             onSpeak = { vm.speak(m) },
                             onRegenerate = { vm.regenerate() },
-                            onShare = { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, decodeIfEncoded(m.text)), "Share")) },
+                            onShare = { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, com.mazharansari.axion.ui.chat.MessageText.decodeIfEncoded(m.text)), "Share")) },
                             onRate = { vm.rate(m.id, it) },
                             onOpenFile = { a -> if (a.mime == "application/pdf") vm.viewingPdf = a else if (a.mime == "text/html" || a.name.endsWith(".html", true)) vm.viewingHtml = a else openFile(ctx, a) },   // axion-p1.3
                             onDownload = { a -> vm.toast = FileActions.download(ctx, a) },
