@@ -153,8 +153,11 @@ class SwarmWorkerExecutor(private val ctx: ToolContext) {
     private fun progress(task: WorkerTask, steps: Int, note: String) = ctx.onWorkerProgress(task.id, steps, note)
 
     /** This worker's model call: cheap steps ride the fast models, hard steps the strongest. */
-    private fun askFn(task: WorkerTask): (suspend (String) -> String)? =
-        ctx.askWith?.let { w -> { p: String -> w(task.role.modelHint, p) } } ?: ctx.ask
+    private fun askFn(task: WorkerTask): (suspend (String) -> String)? {
+        val withHint = ctx.askWith
+        if (withHint != null) return { p: String -> withHint(task.role.modelHint, p) }
+        return ctx.ask
+    }
 
     /** Researcher: one bounded search on its angle. A dead angle spawns two narrower ones instead of giving up. */
     private suspend fun runResearcher(task: WorkerTask): WorkerResult {
