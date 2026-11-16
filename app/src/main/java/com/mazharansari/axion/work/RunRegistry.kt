@@ -20,7 +20,8 @@ class RunRegistry {
         val kind: Kind,
         /** The chat id (ASK) or project id (BUILD) this run belongs to — never the "currently open" one. */
         val ownerId: String?,
-        val title: String,
+        /** Shown in the foreground notification; Swarm updates it with the live worker count. */
+        internal var title: String,
         val startedAt: Long,
         internal val job: Job,
     )
@@ -58,6 +59,14 @@ class RunRegistry {
             nowEmpty = handles.isEmpty()
         }
         if (nowEmpty) onLastRunFinished?.invoke()
+    }
+
+    /** Swarm (Phase 1): rename a run in flight (the notification re-posts the new title). */
+    fun updateTitle(id: String, title: String) {
+        synchronized(lock) {
+            handles[id]?.let { it.title = title }
+            _active.value = handles.values.toList()
+        }
     }
 
     fun isActive(id: String): Boolean = synchronized(lock) { handles.containsKey(id) }
