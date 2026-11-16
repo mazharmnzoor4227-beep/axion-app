@@ -21,11 +21,11 @@ class P1RoadmapTest {
 
     // ── P1-4: subagent orchestration ──────────────────────────────────────────────
 
-    @Test fun fanOutCapsWorkersAtThree() {
+    @Test fun fanOutCapsWorkersAtFour() {
         val tasks = SubagentOrchestrator.splitAngles("phones", listOf("a", "b", "c", "d", "e"))
         assertEquals(SubagentLimits.MAX_WORKERS, tasks.size)
-        assertEquals(listOf("w1", "w2", "w3"), tasks.map { it.id })
-        assertEquals(listOf("a", "b", "c"), tasks.map { it.angle })
+        assertEquals(listOf("w1", "w2", "w3", "w4"), tasks.map { it.id })
+        assertEquals(listOf("a", "b", "c", "d"), tasks.map { it.angle })
     }
 
     @Test fun workerToolAllowListIsWebOnly() {
