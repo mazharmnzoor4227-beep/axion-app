@@ -46,6 +46,8 @@ class Graph(val app: Application) {
     val connectors by lazy { ConnectorRepo(app) }
     val workspace by lazy { Workspace(File(app.filesDir, "workspace")) }
     val skills by lazy { SkillRepo(app, File(app.filesDir, "skills")) }
+    /** Bot Store (Phase 1): installed + user-created bot definitions (bots.json). */
+    val botStore by lazy { com.mazharansari.axion.data.BotDefinitionStore(File(app.filesDir, "bots")) }
     /** v0.10: the learning loop's persistent memory (agent-curated; Settings → Memory shows it all). */
     val memory by lazy { com.mazharansari.axion.data.MemoryStore(app) }
     /** v0.12: remembered approvals for gated shell work (Settings → Approvals shows/revokes them). */
@@ -165,6 +167,8 @@ class Graph(val app: Application) {
             r.onLastRunFinished = { com.mazharansari.axion.work.WorkService.stop(app) }
         }
     }
+    /** Swarm (Phase 1): every live bot — the CEO run and each worker it spawned — for the Bots section. */
+    val bots by lazy { com.mazharansari.axion.agent.BotRegistry(chats) }
     val storage by lazy { com.mazharansari.axion.linux.StorageRepo(app, this) }   // v0.5.3 Settings → Storage
     val localModels by lazy { com.mazharansari.axion.local.LocalModelStore(app).also { com.mazharansari.axion.local.LocalEngine.libDir = app.applicationInfo.nativeLibraryDir.orEmpty() } }
 
