@@ -46,7 +46,7 @@ fun BotStoreScreen(vm: ChatViewModel, back: () -> Unit) {
     val installed by vm.g.botStore.definitions.collectAsState()
     SettingsPage("Bot Store", back) {
         Text("Install a bot to give it work. A bot is a definition — persona, skills and a tool allow-list — run on Axion's own agent loop. Install never starts a bot; you start it from the Bots section.",
-            fontSize = 13.sp, color = p.text2, modifier = Modifier.padding(horizontal = 16.dp, top = 6.dp, bottom = 12.dp))
+            fontSize = 13.sp, color = p.text2, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp))
         BotCatalog.seeds.forEach { seed ->
             val isIn = installed.any { it.id == seed.id }
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)
@@ -76,7 +76,7 @@ fun BotStoreScreen(vm: ChatViewModel, back: () -> Unit) {
             }
         }
         Text("Providers: bots run on the free providers you already use — Gemini, Grok, OpenRouter — through Axion's provider system and failover. Antigravity is the Build engine.",
-            fontSize = 12.sp, color = p.text3, modifier = Modifier.padding(horizontal = 16.dp, top = 12.dp))
+            fontSize = 12.sp, color = p.text3, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp))
         Spacer(Modifier.height(8.dp))
     }
 }
