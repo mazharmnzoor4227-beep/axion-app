@@ -13,7 +13,7 @@
 name: Verify Tests (v0.9.7)
 on:
   push:
-    branches: [axion-v094-composer-fix]
+    branches: [axion-v094-composer-fix, swarm-phase1-097]
   workflow_dispatch:
 jobs:
   test:
