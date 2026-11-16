@@ -1,0 +1,21 @@
+Hermes Agent skills — credit (MIT)
+
+The SKILL.md files in this folder that came from the Hermes Agent project are
+the work of Nous Research, from https://github.com/NousResearch/hermes-agent
+(MIT licence). Hermes Agent is Python/TypeScript; no Hermes code was copied
+into Axion (a Kotlin app) — only the skill texts and the PATTERNS they teach
+(learning loop, subagent delegation with per-subagent provider/model/limits,
+built-in cron scheduler, memory search across sessions) were ported into
+Axion's own Kotlin in v0.9.7 (agent/Swarm.kt, agent/SwarmVerify.kt,
+agent/SwarmRuns.kt, data/BotStore.kt, data/BotCatalog.kt).
+
+The bundled Hermes-port skills are: agent-building, token-efficiency,
+local_verify_before_recommending, local-pre-delivery-verification-gate,
+local-verified-status-claims, ponytail-minimal-code, local-android-dev,
+local_reference_pattern_research_gate. The "local-*" and ponytail texts are
+the user's own custom skills, repackaged in the Hermes agentskills.io format;
+they are bundled as-is and were not edited. Ponytail's own rules come from
+DietrichGebert/ponytail (MIT); see third_party/NOTICE-bot-store.md.
+
+This file is an attribution note, not a licence text. The full MIT licence
+of Hermes Agent is in that repository's LICENSE file.
