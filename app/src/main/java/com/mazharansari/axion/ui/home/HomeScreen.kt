@@ -83,7 +83,7 @@ fun HomeScreen(vm: ChatViewModel, navigate: (Route) -> Unit, initialDrawer: Bool
     }
     // Opening a thread from the menu lands on its own tab.
     LaunchedEffect(vm.conversationId, vm.section) {
-        if (vm.conversationId != null) { if (vm.section == com.mazharansari.axion.ui.Section.BUILD) tab = 2 else if (tab == 2) tab = 0 }
+        if (vm.conversationId != null) { if (vm.section == com.mazharansari.axion.ui.Section.BUILD) tab = 2 else if (tab == 2 || tab == 3) tab = 0 }
     }
     var drawerOpen by remember { mutableStateOf(initialDrawer) }
     val widthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
@@ -92,6 +92,8 @@ fun HomeScreen(vm: ChatViewModel, navigate: (Route) -> Unit, initialDrawer: Bool
     val anim by animateFloatAsState(target, tween(280, easing = FastOutSlowInEasing), label = "drawer")
     val frac = if (drag != 0f) ((if (drawerOpen) 1f else 0f) + drag / widthPx).coerceIn(0f, 1f) else anim
     BackHandler(drawerOpen) { drawerOpen = false }
+    // Swarm (Phase 1): Back from a worker transcript returns to its parent chat.
+    BackHandler(vm.viewingWorkerTranscript) { vm.closeWorkerChat() }
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         Box(Modifier.fillMaxSize().pointerInput(drawerOpen) {
@@ -104,6 +106,11 @@ fun HomeScreen(vm: ChatViewModel, navigate: (Route) -> Unit, initialDrawer: Bool
                 when (t) {
                     0 -> ChatPane(vm, navigate, onBuild = { switchTab(2) }, onImagine = { tab = 1 })
                     1 -> Column(Modifier.fillMaxSize()) { Spacer(Modifier.statusBarsPadding().height(64.dp)); ImaginePane(vm) }
+                    // Swarm (Phase 1): the Bots section — every live bot (parent + workers), installed bots, finished workers.
+                    3 -> Column(Modifier.fillMaxSize()) {
+                        Spacer(Modifier.statusBarsPadding().height(64.dp))
+                        com.mazharansari.axion.ui.bots.BotsPane(vm, navigate, onStartBot = { bot -> switchTab(0); vm.startBotChat(bot) })
+                    }
                     // v0.4: a Build thread shows as a chat run by Antigravity; otherwise Build's start page (or its setup card)
                     // v0.5: Build = projects. Inside a project: Chat | Files | Preview; otherwise the projects list (or its setup card).
                     else -> if (vm.projectId != null) com.mazharansari.axion.ui.build.ProjectWorkspace(vm, navigate)
@@ -156,7 +163,8 @@ private fun TopBar(tab: Int, empty: Boolean, onTab: (Int) -> Unit, onMenu: () ->
                     Box(Modifier.size(width = 16.dp, height = 2.5.dp).clip(RoundedCornerShape(50)).background(p.dim))
                 }
             } else Row(horizontalArrangement = Arrangement.spacedBy(27.dp), verticalAlignment = Alignment.Top) {
-                listOf(0 to "Ask", 2 to "Build").forEach { (i, label) ->
+                // Swarm (Phase 1): "Bots" sits between Ask and Build.
+                listOf(0 to "Ask", 3 to "Bots", 2 to "Build").forEach { (i, label) ->
                     val sel = tab == i
                     val tap = rememberTap { onTab(i) }
                     val c by animateColorAsState(if (sel) p.text else p.dim, tween(160), label = "tab")
@@ -266,7 +274,7 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                 if (pullPx <= 0f) return androidx.compose.ui.unit.Velocity.Zero
                 val go = armed
                 armed = false
-                if (go) { vm.newChat() }
+                if (go && !vm.viewingWorkerTranscript) { vm.newChat() }
                 androidx.compose.animation.core.animate(pullPx, 0f, animationSpec = tween(260, easing = FastOutSlowInEasing)) { v, _ -> pullPx = v }
                 return available
             }
@@ -298,6 +306,8 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                             onRate = { vm.rate(m.id, it) },
                             onOpenFile = { a -> if (a.mime == "application/pdf") vm.viewingPdf = a else if (a.mime == "text/html" || a.name.endsWith(".html", true)) vm.viewingHtml = a else openFile(ctx, a) },   // axion-p1.3
                             onDownload = { a -> vm.toast = FileActions.download(ctx, a) },
+                            // Swarm (Phase 1): a worker step opens that worker's own chat.
+                            onOpenWorker = { vm.openWorkerChat(it, vm.conversationId) },
                         )
                     }
                 }
@@ -382,6 +392,27 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                 // v0.5.2 (mazhar's test): Build never shows the Ask-only key chips — it shows what Build actually needs.
                 if (messages.isEmpty() && !plus && !model && build) BuildChips(ready = vm.buildReady(), onAgy = { navigate(Route.Antigravity) }, onTools = { navigate(Route.DevTools) })
                 else if (messages.isEmpty() && !plus && !model) SuggestionChips(noKeys = connectors.isEmpty(), researchOn = settings.deepResearch, onResearch = onResearch, longTaskOn = settings.longTask, onLongTask = onLongTask, turboOn = settings.turbo, onTurbo = onTurbo, onConnect = { navigate(Route.Connectors) }, onSkills = { navigate(Route.Skills) }, onBuild = onBuild, onVoice = { navigate(Route.VoiceCall) })
+                // Swarm (Phase 1): a worker transcript is read-only — no toggles, no composer.
+                // The banner says so and offers the way back to the parent chat.
+                if (vm.viewingWorkerTranscript) {
+                    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card).border(1.dp, p.border, RoundedCornerShape(16.dp)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        GkIcon(Gk.agent, null, 18.dp, p.text2); Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Worker transcript — read-only", style = Type.small.copy(fontWeight = FontWeight.SemiBold), color = p.text)
+                            Text("This is what the worker was asked and did.", style = Type.tiny, color = p.text2, maxLines = 1)
+                        }
+                        TextButton(onClick = { vm.closeWorkerChat() }) { Text("Back to parent chat", color = p.accent) }
+                    }
+                } else {
+                    // Bot Store (Phase 1): this chat runs as an installed/created bot — say so, with a way out.
+                    vm.activeBot?.let { bot ->
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 2.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            GkIcon(Gk.brain, null, 16.dp, p.accent); Spacer(Modifier.width(6.dp))
+                            Text("Chatting as ${bot.name}", style = Type.tiny, color = p.text2, modifier = Modifier.weight(1f), maxLines = 1)
+                            TextButton(onClick = { vm.exitBot() }) { Text("Exit bot", color = p.text2, style = Type.tiny) }
+                        }
+                    }
                 // v0.9.4: the 10X tool toggles live in their own line ABOVE the box — inside the box they
                 // pushed the mic and the Send button off the right edge (no Send at all). Same chips,
                 // same behaviour, only the placement changed. Ask only: Build never shows them.
@@ -412,6 +443,7 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                     onSend = { vm.send() }, onStop = { vm.stop() }, onVoiceCall = { navigate(Route.VoiceCall) },
                     plusOpen = plus, modeOpen = model, onFocus = { vm.prewarm() },
                 )
+                }   // !viewingWorkerTranscript: the composer and toggles belong to a live chat, not a worker transcript
             }
             // v0.12: the approval gate — a consequential shell command waits for the user's answer.
             vm.pendingApproval?.let { pa ->
@@ -585,7 +617,7 @@ private fun DrawerContent(vm: ChatViewModel, onClose: () -> Unit, onOpen: (Strin
     var renaming by remember { mutableStateOf<ConversationMeta?>(null) }
     val activeRuns by vm.g.runs.active.collectAsState()   // v0.8.0: chats still working in the background get a "Working" mark
     var collapsed by remember { mutableStateOf(false) }
-    val filtered = remember(index, q) { index.filter { q.isBlank() || it.title.contains(q, true) || it.preview.contains(q, true) } }
+    val filtered = remember(index, q) { index.filter { it.section != "worker" && (q.isBlank() || it.title.contains(q, true) || it.preview.contains(q, true)) } }
     val pinned = filtered.filter { it.pinned }; val rest = filtered.filterNot { it.pinned }
     Box(Modifier.fillMaxSize().background(p.page2)) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(), bottom = 120.dp)) {
