@@ -79,6 +79,17 @@ object ApprovalGate {
         }
         // P1-2 (§6.3): writing MCP calls (MCP_WRITE) gate here too; read-only MCP calls return null inside McpGate.
         if (tool.startsWith("mcp_")) return com.mazharansari.axion.mcp.McpGate.requestFor(tool, args)
+        // Swarm (Phase 1): a swarm can write workspace files and run test commands through its
+        // workers, so the parent run asks the user ONCE for the whole swarm. Workers never ask
+        // for approvals themselves, and their shell commands still hit the denylist below.
+        if (tool == "subagent_swarm") {
+            val task = args.s("task")?.trim().orEmpty()
+            return GateRequest(
+                tool = tool,
+                summary = "Run a swarm of workers: ${task.take(120)}",
+                pattern = "subagent swarm",
+            )
+        }
         if (tool !in SHELL_TOOLS) return null
         val cmd = args.s("command")?.trim().orEmpty()
         if (cmd.isBlank()) return null
