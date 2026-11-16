@@ -40,6 +40,8 @@ sealed interface Route {
     data object GitHub : Route
     // P2-1 — Telegram bot control (a bot token is typed here)
     data object Telegram : Route
+    // P1 — Bot Store (installable bot definitions)
+    data object BotStore : Route
 }
 
 /** v0.5.2: routes shown with FLAG_SECURE (a key, token or password can be typed or shown on them). */
