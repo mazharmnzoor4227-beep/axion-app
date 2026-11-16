@@ -1,7 +1,7 @@
 name: Release Build (v0.9.7)
 on:
   push:
-    branches: [main]
+    branches: [main, swarm-phase1-097]
   workflow_dispatch:
 jobs:
   build:
