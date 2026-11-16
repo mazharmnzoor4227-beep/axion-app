@@ -195,7 +195,7 @@ fun SheetRow(icon: Int, title: String, subtitle: String? = null, color: Color = 
 fun stepIcon(k: StepKind) = when (k) {
     StepKind.SEARCH -> Gk.search; StepKind.BROWSE -> Gk.globe; StepKind.COMMAND -> Gk.terminal; StepKind.READ -> Gk.readFile
     StepKind.WRITE -> Gk.writeFile; StepKind.SKILL -> Gk.skills; StepKind.PDF -> Gk.writeFile; StepKind.ZIP -> Gk.folder
-    StepKind.MCP -> Gk.connectors; StepKind.THINK -> Gk.think; StepKind.OTHER -> Gk.tool
+    StepKind.MCP -> Gk.connectors; StepKind.THINK -> Gk.think; StepKind.WORKER -> Gk.agent; StepKind.OTHER -> Gk.tool
 }
 
 /** "Ran 2 searches" / "Browsed claworabeauty.store" — grey verb, white target (filenames in Google Sans Code). */
