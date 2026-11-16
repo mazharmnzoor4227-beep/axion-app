@@ -5,7 +5,11 @@ package com.mazharansari.axion.skills
  * (Settings → Skills → Skill hub). Three sources, all real, no demo content:
  *
  *   BUILT-IN  the app's own skill set, read live from [SkillRepo] (its asset folders —
- *             pdf, website-audit, deep-research, roman-urdu, video);
+ *             pdf, website-audit, deep-research, roman-urdu, video, plus the v0.9.7
+ *             Hermes-port set: agent-building, token-efficiency,
+ *             local_verify_before_recommending, local-pre-delivery-verification-gate,
+ *             local-verified-status-claims, ponytail-minimal-code, local-android-dev,
+ *             local_reference_pattern_research_gate — see third_party/NOTICE-hermes.md);
  *   MIKA      the 5 translated Mika skills from P0-10, which ship as built-in assets
  *             (mika-content-transcribe, mika-documents, mika-info-research,
  *             mika-messaging, mika-skill-authoring). Licence Apache-2.0, recorded in
