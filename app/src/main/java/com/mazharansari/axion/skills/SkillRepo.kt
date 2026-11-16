@@ -202,7 +202,10 @@ class SkillRepo(private val ctx: Context?, private val dir: File) {
     companion object {
         /** Source tag for skills the agent wrote itself (Settings → Skills shows them as "Learned"). */
         const val LEARNED = "learned"
-        val BUILT_IN = listOf("pdf", "website-audit", "deep-research", "roman-urdu", "video")
+        val BUILT_IN = listOf("pdf", "website-audit", "deep-research", "roman-urdu", "video",
+            "agent-building", "token-efficiency", "local_verify_before_recommending",
+            "local-pre-delivery-verification-gate", "local-verified-status-claims",
+            "ponytail-minimal-code", "local-android-dev", "local_reference_pattern_research_gate")
         fun frontMatter(text: String, fallback: String): Pair<String, String> {
             val fm = Regex("^---\\s*\\n(.*?)\\n---", RegexOption.DOT_MATCHES_ALL).find(text.trimStart())?.groupValues?.get(1).orEmpty()
             fun field(k: String) = Regex("^$k:\\s*(.+)$", RegexOption.MULTILINE).find(fm)?.groupValues?.get(1)?.trim()?.trim('"', '\'')
