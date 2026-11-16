@@ -44,7 +44,7 @@ import com.mazharansari.axion.ui.theme.Type
  * a second tap. Monospace, scrolls both ways, copy button. Bash steps keep their own BashCard (command + output).
  */
 @Composable
-fun ExpandableStep(s: Step, size: Int = 15, startOpen: Boolean = false) {
+fun ExpandableStep(s: Step, size: Int = 15, startOpen: Boolean = false, onOpenWorker: ((String) -> Unit)? = null) {
     var open by rememberSaveable(s.id) { mutableStateOf(startOpen) }
     val body = s.detail.ifBlank { s.output }
     // v0.5 Build: while a file is being written its code streams into the open box (tail shown); when the step ends the box
@@ -65,6 +65,14 @@ fun ExpandableStep(s: Step, size: Int = 15, startOpen: Boolean = false) {
                 code = if (streaming) body.lines().takeLast(36).joinToString("\n") else body,
                 lang = when { isDiff -> "diff"; s.detail.isNotBlank() -> langOf(s.target); else -> "text" }, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
             )
+            // Swarm (Phase 1): a worker step opens that worker's own chat (its full transcript).
+            if (s.kind == StepKind.WORKER) {
+                onOpenWorker?.let { openWorker ->
+                    androidx.compose.material3.TextButton(onClick = { openWorker("worker-" + s.id.removePrefix("swarm-")) }, modifier = Modifier.padding(top = 2.dp)) {
+                        Text("Open worker chat", color = P.accent, fontSize = 13.sp)
+                    }
+                }
+            }
         }
     }
 }
