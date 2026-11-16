@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 enum class Role { USER, ASSISTANT }
 
 @Serializable
-enum class StepKind { THINK, SEARCH, BROWSE, COMMAND, READ, WRITE, SKILL, PDF, ZIP, MCP, OTHER }
+enum class StepKind { THINK, SEARCH, BROWSE, COMMAND, READ, WRITE, SKILL, PDF, ZIP, MCP, WORKER, OTHER }
 
 @Serializable
 enum class StepStatus { RUNNING, DONE, ERROR }
