@@ -1,4 +1,4 @@
-name: Release Build (v0.9.6)
+name: Release Build (v0.9.7)
 on:
   push:
     branches: [main]
