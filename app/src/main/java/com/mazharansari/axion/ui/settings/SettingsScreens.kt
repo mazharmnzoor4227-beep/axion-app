@@ -8,8 +8,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.content.Intent
 import android.net.Uri
-import android.provider.Settings as AndroidSettings
-import androidx.core.app.NotificationManagerCompat
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -188,19 +186,6 @@ fun AdvancedScreen(vm: ChatViewModel, back: () -> Unit) {
     val s = settingsOf(vm)
     val ctx = LocalContext.current
     SettingsPage("Advanced", back) {
-        SectionLabel("Assistant")
-        SettingsGroup {
-            // Phase F (v0.8.5): assistant announcements — Android itself must grant Notification access first; the toggle opens that system page when access is missing.
-            val notifAccess = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
-            ToggleRow(Gk.bell, "Assistant announcements", if (!notifAccess) "Reads new WhatsApp / Telegram messages aloud — tap to grant Notification access first" else if (s.assistantAnnounce) "On: new messages are read aloud as they arrive" else "Off: read new WhatsApp / Telegram messages aloud as they arrive", s.assistantAnnounce && notifAccess) { v ->
-                if (v && !notifAccess) {
-                    runCatching { ctx.startActivity(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                } else {
-                    vm.g.settings.update { it.copy(assistantAnnounce = v) }
-                    if (!v) com.mazharansari.axion.assistant.AssistantAnnouncer.stop()
-                }
-            }
-        }
         SectionLabel("Paste as File")
         SettingsGroup {
             listOf("Always ask", "Always", "Never").forEach { l ->
