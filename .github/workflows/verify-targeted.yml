@@ -1,4 +1,4 @@
-# Targeted verification for the v0.9.4 composer fix (one-off, not the full suite).
+# Targeted verification for the v0.9.7 composer fix (one-off, not the full suite).
 # The full suite hangs on CI after V053AuthStorageTest (46 min of silence, no output),
 # so the disputed items are checked here instead, one class at a time with a hard
 # per-class timeout so a hanging class is named instead of stalling the whole run:
@@ -8,7 +8,7 @@
 # Run this on BOTH the fix branch and the release-0.9.3 baseline and compare.
 # Honest gates (P0-13): no `|| true` hides a failure. Every failing class is recorded
 # in the job summary and fails the job at the end (after all classes have run).
-name: Verify Targeted (v0.9.4)
+name: Verify Targeted (v0.9.7)
 on:
   push:
     branches: [axion-v094-composer-fix, axion-baseline-test, axion-roadmap-p0, axion-roadmap-p1, axion-roadmap-p2]
