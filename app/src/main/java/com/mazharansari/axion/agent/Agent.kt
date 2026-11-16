@@ -107,6 +107,10 @@ class Agent(
             DeepResearchTool(),
             // P1-4: subagent orchestration — 3 parallel research workers, merged and deduped
             SubagentResearchTool(),
+            // Swarm (Phase 1): general multi-agent orchestration — up to 4 parallel workers
+            // with roles (researcher/coder/tester/reviewer); a worker that cannot finish alone
+            // spawns its own sub-workers. Only the parent merges and acts on the result.
+            SubagentSwarmTool(),
             // v0.12: scheduled tasks — create/list/delete; WorkManager runs them headlessly later
             ScheduleCreateTool(), ScheduleListTool(), ScheduleDeleteTool(),
             // P1-1: in-app GitHub coding agent (clone, branch, commit, push, PRs, CI)
@@ -161,6 +165,12 @@ class Agent(
         sink: AgentSink,
         profile: Profile = Profile(),
         intent: Intent = Intent.ACTION,
+        /** Swarm (Phase 1): the parent conversation id — worker updates link to this run's parent card. */
+        swarmParentId: String? = null,
+        /** Bot Store (Phase 1): a bot's persona block (name + role + allow-list) for a chat run as that bot; null = plain Axion. */
+        systemExtra: String? = null,
+        /** Brain (Phase 1): fast-model attempts for cheap worker steps; null = same as [attempts]. */
+        fastAttempts: (() -> List<Attempt>)? = null,
     ): String {
         // axion-p2: strategy = PLAN (only plan_set offered) → EXECUTE (all tools, guarded by FaultPolicy) → FINISH; old turns folded into session notes.
         val planState = PlanState()
@@ -207,7 +217,8 @@ class Agent(
         val longTaskBlock = if (longTask && intent == Intent.ACTION) "\n\n" + LONG_TASK_GUIDANCE else ""
         val turboBlock = if (turbo) "\n\n" + TURBO_GUIDANCE else ""
         val sys = systemPrompt(profile, tools, intent) + memBlock + hint + (if (folded.notes.isNotBlank()) "\n\n" + folded.notes else "") + (if (wantsPlan) "\n\n" + Planner.INSTRUCTIONS else "") +
-            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock + researchOffBlock + longTaskBlock + turboBlock
+            (if (tools.isNotEmpty()) ToolCatalog.promptNote(sw).let { if (it.isBlank()) "" else "\n\n" + it } else "") + learnBlock + researchBlock + researchOffBlock + longTaskBlock + turboBlock +
+            (if (!systemExtra.isNullOrBlank()) "\n\n" + systemExtra else "")
         val items = mutableListOf<ChatItem>(SystemItem(sys))
         items += folded.recent
         items += user
@@ -221,6 +232,41 @@ class Agent(
         val policy = FaultPolicy(maxAlternatives = if (longTask) 6 else 2, maxToolCalls = if (longTask) 200 else 40)
         // v0.11: tools that think internally (deep research) get plain completions on this run's own models.
         val ask: suspend (String) -> String = { prompt -> askOnce(attempts, prompt) }
+        // Brain (Phase 1): per-worker model routing — cheap steps ("fast": research, tests)
+        // go to the fast models, hard steps ("strong": coding, reviewing) to the strongest
+        // available; both ride the ranked failover in askOnce, so a weak key fails over
+        // instead of silently answering wrong.
+        val askWith: suspend (String, String) -> String = { hint, prompt ->
+            askOnce(if (hint == "fast") (fastAttempts ?: attempts) else attempts, prompt)
+        }
+        // Swarm (Phase 1): one card per worker in the chat AND in the Bots section. The
+        // update id is the card id; progress notes arrive keyed by worker id, so the last
+        // update per worker is kept to re-emit them on the same card.
+        val workerCards = mutableMapOf<String, WorkerUpdate>()
+        val workerStartedAt = mutableMapOf<String, Long>()
+        val emitWorker: (WorkerUpdate) -> Unit = { u ->
+            workerCards[u.workerId] = u
+            val st = when (u.status) {
+                WorkerStatus.RUNNING -> StepStatus.RUNNING
+                WorkerStatus.DONE -> StepStatus.DONE
+                WorkerStatus.FAILED -> StepStatus.ERROR
+            }
+            val now = System.currentTimeMillis()
+            sink.step(Step(id = "swarm-${u.updateId}", kind = StepKind.WORKER,
+                title = "Worker · ${u.role.label}", target = u.task.take(90), status = st,
+                startedAt = if (u.status == WorkerStatus.RUNNING) workerStartedAt.getOrPut(u.workerId) { now } else 0,
+                endedAt = if (u.status == WorkerStatus.RUNNING) 0 else now,
+                output = when (u.status) {
+                    WorkerStatus.RUNNING -> "Working… ${u.stepsUsed} steps"
+                    WorkerStatus.DONE -> u.summary.ifBlank { "Done" }
+                    WorkerStatus.FAILED -> "Failed: ${u.summary}"
+                }))
+            (appCtx as? com.mazharansari.axion.AxionApp)?.graph?.bots?.onWorkerUpdate(u)
+        }
+        val emitWorkerProgress: (String, Int, String) -> Unit = { workerId, steps, note ->
+            workerCards[workerId]?.let { last -> emitWorker(last.copy(stepsUsed = steps)) }
+            (appCtx as? com.mazharansari.axion.AxionApp)?.graph?.bots?.onWorkerProgress(workerId, steps, note)
+        }
         repeat(maxRounds) { round ->
             val specs = when { toolsOff -> emptyList(); planPhase -> listOf(Planner.planSetSpec); else -> tools.map { it.spec } }
             val (text, calls) = streamOnce(HistoryCompressor.compressRun(items), specs, attempts, sink, quick, effort)
@@ -228,7 +274,7 @@ class Agent(
             items += AssistantItem(text, calls)
             if (calls.isEmpty()) { answer.append(text); if (planState.active) { planState.finish(ok = !toolsOff, reason = "stopped early"); onPlan() }; return answer.toString() }
             if (text.isNotBlank()) sink.textToThoughts()
-            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask, turbo = turbo)
+            val ctx = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask, askWith = askWith, swarmParentId = swarmParentId, turbo = turbo)
             for (call in calls) {
                 val tool = byName[call.name]
                 val args = runCatching { Json.parseToJsonElement(call.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
@@ -272,7 +318,14 @@ class Agent(
                 val step = Step(id = UUID.randomUUID().toString(), kind = label.kind, title = label.title, target = label.target, status = StepStatus.RUNNING, startedAt = System.currentTimeMillis(), detail = detail)
                 sink.step(step)
                 var lastPush = 0L
-                val live = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask, turbo = turbo) { partial ->
+                val live = ToolContext(workspace, skills, memory = memory, chats = conversations, schedules = schedules, appCtx = appCtx, ask = ask, askWith = askWith, swarmParentId = swarmParentId, turbo = turbo,
+                    // Swarm (Phase 1): each worker is its own live card in the chat — role, task,
+                    // status and step count, updating as the worker runs. The card id is the
+                    // worker's update id, so two swarms never overwrite each other's cards.
+                    // The same update also lands in the Bots section registry, and progress
+                    // notes promote the card STARTING → WORKING with a transcript line.
+                    onWorker = emitWorker,
+                    onWorkerProgress = emitWorkerProgress) { partial ->
                     val now = System.currentTimeMillis()
                     if (now - lastPush > 250) { lastPush = now; sink.step(step.copy(output = com.mazharansari.axion.security.SecretScanner.scrub(partial))) }
                 }
@@ -443,6 +496,7 @@ class Agent(
                 else {
                     appendLine("- web_search + browse_url for current facts or websites; run_command for shell work; read_file/list_files/extract_zip for uploads (in uploads/); write_file for code/documents (files go in outputs/); create_pdf for reports; generate_image for pictures.")
                     appendLine("- YOUR BROWSER (browser_* tools): a real browser — use it when a page needs JavaScript, clicking, typing into forms, logging in, or step-by-step navigation. Flow: browser_open (or browser_search) → read the numbered elements → browser_click / browser_type by number → browser_read again after each navigation (numbers change). browse_url is still the faster choice for a plain article or a quick static read. browser_screenshot saves a picture of the page for the user.")
+                    appendLine("- SWARM (subagent_swarm): when a task has several independent parts, fan it out to parallel workers with roles (researcher/coder/tester/reviewer) instead of doing it all yourself. A worker that cannot finish alone spawns its own sub-workers. You — and only you — merge the results and act on them; workers never post, install or pay anything. Verify before you deliver: never present a worker's result as done until it is checked (sources cited, files read back, tests run). If a check fails, say what failed and what is still unverified — never claim success to cover a failure.")
                     appendLine("- TERMINAL: run_command is a fresh shell each time (quick one-off commands). shell_session is ONE persistent shell — cd and exported variables survive between calls; use it for multi-step work in one place. run_background + job_output + job_kill are for commands that take many minutes (builds, downloads, servers) so the chat is not blocked.")
                     appendLine("- Load the matching skill (load_skill) before a specialised task. A GitHub URL with skills → install_skills_from_github.")
                     appendLine("- Safe steps need no permission; ask before anything destructive, paid or public. Finish with a short summary of what you did.")
