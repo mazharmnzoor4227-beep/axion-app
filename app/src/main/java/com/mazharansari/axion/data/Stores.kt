@@ -35,7 +35,7 @@ data class AppSettings(
     val allowLargeUngated: Boolean = false,
     /** v0.6 Tools library: group id to on/off (missing = the group default). */
     val toolSwitches: Map<String, Boolean> = emptyMap(),
-    val pasteAsFile: String = "Always ask",
+    val pasteAsFile: String = "Always",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,
     /** v0.11: the composer's Research toggle — while on, factual questions go through the deep_research pipeline. */

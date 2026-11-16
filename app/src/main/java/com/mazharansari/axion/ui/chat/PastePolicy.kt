@@ -4,8 +4,8 @@ package com.mazharansari.axion.ui.chat
  * Phase 2 (settings audit): the pure decision behind Settings → Advanced → "Paste as File".
  * Kept dependency-free so the rule is unit-testable without a device.
  *
- * - "Always": any paste over [alwaysLimit] goes in as a .txt attachment.
- * - "Always ask" (default): only a giant paste over [inlineLimit] asks first.
+ * - "Always" (default): any paste over [alwaysLimit] goes in as a .txt attachment.
+ * - "Always ask": only a giant paste over [inlineLimit] asks first.
  * - "Never": nothing is ever converted.
  * Anything else (including an unknown stored value) behaves like "Never" is never
  * assumed — it falls through to inline, so a corrupt setting cannot eat a message.

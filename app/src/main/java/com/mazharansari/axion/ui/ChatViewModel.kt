@@ -453,8 +453,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         // Phase 2 (settings audit): "Paste as File" (Settings → Advanced) used to be a dead
         // control — the setting was never read and every giant paste was silently converted.
-        // Now it is honoured: "Always" converts any paste over 2,000 chars, "Always ask"
-        // (default) asks before converting a giant paste, "Never" never converts.
+        // Now it is honoured: "Always" (default) converts any paste over 2,000 chars, "Always ask"
+        // asks before converting a giant paste, "Never" never converts.
         if (!skipPasteCheck) {
             val pasteMode = g.settings.state.value.pasteAsFile
             when (com.mazharansari.axion.ui.chat.PastePolicy.decide(pasteMode, text.length, maxInlineChars)) {
