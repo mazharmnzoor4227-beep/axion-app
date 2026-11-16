@@ -32,8 +32,6 @@ data class AppSettings(
     val allowLargeUngated: Boolean = false,
     /** v0.6 Tools library: group id to on/off (missing = the group default). */
     val toolSwitches: Map<String, Boolean> = emptyMap(),
-    /** Phase F (v0.8.5): the assistant reads new message notifications aloud. Default OFF; also needs the system's Notification access grant. */
-    val assistantAnnounce: Boolean = false,
     val pasteAsFile: String = "Always ask",
     /** Developer tools › Free Mode: route only to free-tier providers (and Antigravity / Free (slow)). */
     val freeMode: Boolean = false,
