@@ -11,7 +11,7 @@
 name: Verify Targeted (v0.9.7)
 on:
   push:
-    branches: [axion-v094-composer-fix, axion-baseline-test, axion-roadmap-p0, axion-roadmap-p1, axion-roadmap-p2]
+    branches: [axion-v094-composer-fix, axion-baseline-test, axion-roadmap-p0, axion-roadmap-p1, axion-roadmap-p2, swarm-phase1-097]
   workflow_dispatch:
 jobs:
   test:
