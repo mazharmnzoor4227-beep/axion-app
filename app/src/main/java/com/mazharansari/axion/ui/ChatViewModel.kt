@@ -37,6 +37,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     var running by mutableStateOf(false); private set
     val pending = mutableStateListOf<Attachment>()
     var draft by mutableStateOf("")
+    /** Phase 2 (WhatsApp-style chats): one input draft per conversation id — leaving a
+     * chat saves what was typed, opening it again restores it (the old single draft
+     * leaked into the wrong chat and New chat wiped it). */
+    private val drafts = com.mazharansari.axion.data.ConversationDrafts()
+    /** Phase 2: per-conversation scroll position (first visible item), best-effort restore. */
+    private val scrollPositions = HashMap<String, Int>()
+    fun saveScroll(id: String?, index: Int) { if (id != null && index > 0) scrollPositions[id] = index }
+    fun scrollFor(id: String?): Int = if (id == null) 0 else scrollPositions[id] ?: 0
+    /** The bot a saved conversation was running as, if any (restored on open). */
+    private fun botFor(botId: String): com.mazharansari.axion.data.BotDefinition? =
+        botId.ifBlank { null }?.let { id -> g.botStore.definitions.value.firstOrNull { it.id == id } }
     var toast by mutableStateOf<String?>(null)
     /** v0.5.3 tests/screenshots: Storage screen with fixed numbers (items, free bytes). */
     var debugStorage by mutableStateOf<Pair<List<com.mazharansari.axion.linux.StorageItem>, Long>?>(null)
@@ -81,14 +92,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     var localSpeed by mutableStateOf<com.mazharansari.axion.local.LocalSpeed?>(null); private set
     init {
         viewModelScope.launch {
-            val rec = g.taskRuns.current.value
-            if (rec != null && rec.status == "running") { g.taskRuns.finish("interrupted"); interruptedTask = rec.copy(status = "interrupted") }
+            // Phase 2 (background): EVERY run still marked running died with the process
+            // (chat turns and Build turns too, not just long tasks) — surface the most
+            // recent one with a one-tap resume; the rest keep their partial reply in
+            // their own chat and resume by opening it.
+            val interrupted = g.taskRuns.markAllRunningInterrupted()
+            interruptedTask = interrupted.maxByOrNull { it.updatedAt }
         }
     }
-    fun dismissInterruptedTask() { interruptedTask = null; g.taskRuns.clear() }
+    fun dismissInterruptedTask() { interruptedTask?.let { g.taskRuns.remove(it) }; interruptedTask = null }
     /** P2-2: reopen the interrupted chat AND pre-fill the continue prompt — the user taps Send to resume from the TaskRuns record. */
     fun resumeInterruptedTask() {
-        interruptedTask?.let { rec -> open(rec.conversationId); if (rec.goal.isNotBlank()) draft = com.mazharansari.axion.agent.ContextBudget.resumeDraft(rec.goal) }
+        // Phase 2: the resume prompt goes into the drafts store BEFORE opening, so the
+        // async load's draft restore brings it back instead of overwriting it.
+        interruptedTask?.let { rec ->
+            if (rec.goal.isNotBlank()) drafts.save(rec.conversationId, com.mazharansari.axion.agent.ContextBudget.resumeDraft(rec.goal))
+            open(rec.conversationId)
+        }
         interruptedTask = null
     }
     var debugOpenFile by mutableStateOf<String?>(null)
@@ -161,6 +181,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun newChat(into: Section = section) {
         // v0.8.0: no stop() — a run in the chat being left keeps working in the background.
+        // Phase 2: the half-typed draft stays with the chat being left, not the new one.
+        drafts.save(conversationId, draft)
         conversationId = null; title = ""; messages = emptyList(); pending.clear(); draft = ""; section = into
         viewingWorkerTranscript = false; workerReturnToId = null; workerReturnToName = null; activeBot = null
         contextUsage = null   // P2-2: the indicator belongs to the conversation just left
@@ -244,6 +266,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun openProject(id: String) {
         val p = g.build.store.get(id) ?: return
         // v0.8.0: no stop() — the project being left keeps working (its row shows "Working").
+        // Phase 2: the draft stays with the chat being left; Build chats are never bot chats.
+        drafts.save(conversationId, draft)
+        activeBot = null
         projectId = id; section = Section.BUILD; undoAvailable = undoPoints.containsKey(id); pendingReview = null; loadPending(p)   // axion-p1.2
         conversationId = null; title = p.name; messages = emptyList(); pending.clear(); draft = ""
         refreshRunning()
@@ -251,6 +276,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val sess = p.conversationId?.let { sessions[it] }
         if (sess != null) {
             conversationId = sess.convId; title = p.name; messages = sess.msgs; createdAt = sess.createdAt
+            draft = drafts.restore(sess.convId)
             refreshRunning()
             return
         }
@@ -259,12 +285,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val c = g.chats.load(cid) ?: return@launch
                 if (projectId != id) return@launch
                 conversationId = c.id; title = p.name; messages = c.messages; createdAt = c.createdAt
+                draft = drafts.restore(c.id)
                 refreshRunning()
             }
         }
     }
 
-    fun closeProject() { projectId = null; conversationId = null; messages = emptyList(); title = ""; refreshRunning() }   // v0.8.0: leaving never stops a run
+    fun closeProject() { drafts.save(conversationId, draft); activeBot = null; projectId = null; conversationId = null; messages = emptyList(); title = ""; draft = ""; refreshRunning() }   // v0.8.0: leaving never stops a run
 
     /** Creates a project and opens its chat. [firstPrompt] (from a template) is sent right away. */
     fun createProject(name: String, kind: String, firstPrompt: String? = null): String {
@@ -293,6 +320,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun open(id: String) {
         if (id == conversationId) return
         // v0.8.0: no stop() — the chat being left keeps working in the background.
+        // Phase 2: its half-typed draft stays with it.
+        drafts.save(conversationId, draft)
         opening = id
         val sess = sessions[id]
         if (sess != null) {
@@ -301,8 +330,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             conversationId = sess.convId; title = sess.title; messages = sess.msgs; createdAt = sess.createdAt
             section = sess.section
             viewingWorkerTranscript = false
-            // Opening a saved chat is a plain Axion chat — a bot run is (re)started from the Bots section.
-            activeBot = null
+            // Phase 2: a live run keeps the bot it started as; a saved chat restores its bot below.
+            activeBot = sess.bot
+            draft = drafts.restore(sess.convId)
             projectId = if (sess.section == Section.BUILD) sess.ownerId else null
             undoAvailable = projectId?.let { undoPoints.containsKey(it) } == true
             pendingReview = null; projectId?.let { pid -> g.build.store.get(pid)?.let { loadPending(it) } }   // axion-p1.2
@@ -317,8 +347,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             section = Section.of(c.section)
             // A worker transcript (section "worker") opens read-only; a normal chat clears it.
             viewingWorkerTranscript = c.section == "worker"
-            // Opening a saved chat is a plain Axion chat — a bot run is (re)started from the Bots section.
-            activeBot = null
+            // Phase 2: the bot this chat ran as is restored from the saved conversation,
+            // so reopening a bot chat keeps working as that bot (its logo shows in the row).
+            activeBot = if (viewingWorkerTranscript) null else botFor(c.botId)
+            draft = drafts.restore(c.id)
             projectId = if (section == Section.BUILD) g.build.store.projectFor(c.id)?.id else null
             undoAvailable = projectId?.let { undoPoints.containsKey(it) } == true
             pendingReview = null; projectId?.let { id -> g.build.store.get(id)?.let { loadPending(it) } }   // axion-p1.2
@@ -385,7 +417,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** v0.5.2: a pasted message longer than this goes in as a .txt attachment instead (keeps the request and the list fast). */
     internal val maxInlineChars = 60_000
 
-    fun send(textIn: String = draft) {
+    /** Phase 2 (settings audit): a giant paste waiting on the user's "Paste as File" choice (Advanced → "Always ask"). */
+    var pendingPaste by mutableStateOf<String?>(null); private set
+
+    /** Write a long pasted text to uploads/ and return the short "read the attachment" text. */
+    private fun pasteToFile(text: String): String {
+        val f = uniqueFile(g.workspace.uploads.apply { mkdirs() }, "pasted_${System.currentTimeMillis()}.txt")
+        runCatching { f.writeText(text) }.onSuccess {
+            pending += Attachment(f.name, "text/plain", f.absolutePath, f.length())
+            return "Read the attached text (${text.length / 1000}k characters)."
+        }
+        return text
+    }
+
+    /** The user answered the "Send as a file?" dialog for [pendingPaste]. */
+    fun resolvePaste(asFile: Boolean) {
+        val t = pendingPaste ?: return
+        pendingPaste = null
+        if (asFile) send(pasteToFile(t)) else send(t, skipPasteCheck = true)
+    }
+
+    /** Dismiss the "Send as a file?" dialog — the text stays in the draft for editing. */
+    fun dismissPaste() { pendingPaste = null }
+
+    fun send(textIn: String = draft, skipPasteCheck: Boolean = false) {
         if (viewingWorkerTranscript) return   // a worker transcript is read-only
         var text = textIn.trim()
         if ((text.isEmpty() && pending.isEmpty()) || running) return
@@ -396,21 +451,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             text = com.mazharansari.axion.security.SecretScanner.scrub(text)
             toast = "Axion hid an API key in your message. Keys are never sent in chat — add them in Settings → Connectors."
         }
-        // v0.5.2 bug hunt: a giant paste froze the list and failed at the provider; send it as a file instead.
-        if (text.length > maxInlineChars) {
-            val f = uniqueFile(g.workspace.uploads.apply { mkdirs() }, "pasted_${System.currentTimeMillis()}.txt")
-            runCatching { f.writeText(text) }.onSuccess { pending += Attachment(f.name, "text/plain", f.absolutePath, f.length()); text = "Read the attached text (${text.length / 1000}k characters)." }
+        // Phase 2 (settings audit): "Paste as File" (Settings → Advanced) used to be a dead
+        // control — the setting was never read and every giant paste was silently converted.
+        // Now it is honoured: "Always" converts any paste over 2,000 chars, "Always ask"
+        // (default) asks before converting a giant paste, "Never" never converts.
+        if (!skipPasteCheck) {
+            val pasteMode = g.settings.state.value.pasteAsFile
+            when (com.mazharansari.axion.ui.chat.PastePolicy.decide(pasteMode, text.length, maxInlineChars)) {
+                com.mazharansari.axion.ui.chat.PasteAction.ASK_USER -> { pendingPaste = text; return }
+                com.mazharansari.axion.ui.chat.PasteAction.CONVERT_TO_FILE -> text = pasteToFile(text)
+                com.mazharansari.axion.ui.chat.PasteAction.SEND_INLINE -> { /* as typed */ }
+            }
         }
         // v0.5.2 bug hunt: offline → say so at once instead of walking every key (each one would be cooled down for nothing).
         if (section == Section.ASK && !isOnline() && g.settings.state.value.mode != "LOCAL") {
             val u = Message(UUID.randomUUID().toString(), Role.USER, text, attachments = pending.toList(), createdAt = System.currentTimeMillis())
             pending.clear(); draft = ""
             if (conversationId == null) { conversationId = UUID.randomUUID().toString(); createdAt = System.currentTimeMillis(); title = text.ifBlank { "New chat" }.lineSequence().first().take(48) }
+            drafts.clear(conversationId)
             messages = messages + u + Message(UUID.randomUUID().toString(), Role.ASSISTANT, status = MsgStatus.ERROR, error = "No internet connection. Check Wi-Fi or mobile data, then tap Regenerate.", createdAt = System.currentTimeMillis())
             persist(true); return
         }
         val user = Message(UUID.randomUUID().toString(), Role.USER, text, attachments = pending.toList(), createdAt = System.currentTimeMillis())
         pending.clear(); draft = ""
+        drafts.clear(conversationId)
         if (section == Section.BUILD && projectId == null) {
             // v0.5: every Build chat lives in a project — name it from the request, the user can rename it.
             val name = text.lineSequence().first().removePrefix("Build ").removePrefix("build ").take(36).trim().ifBlank { "New project" }.replaceFirstChar { it.uppercase() }
@@ -516,12 +580,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun persist(immediate: Boolean = false) {
         val id = conversationId ?: return
-        g.chats.save(Conversation(id, title, messages, createdAt = createdAt, updatedAt = System.currentTimeMillis(), section = section.id), immediate)
+        // Phase 2: the bot this chat runs as is saved with the conversation, so reopening
+        // it restores the bot (and its logo shows in the chat list).
+        g.chats.save(Conversation(id, title, messages, createdAt = createdAt, updatedAt = System.currentTimeMillis(), section = section.id,
+            botId = activeBot?.id.orEmpty(), botName = activeBot?.name.orEmpty()), immediate)
     }
 
     /** v0.8.0: save a run's OWN conversation (never the one that happens to be open). */
     private fun persist(sess: RunSession, immediate: Boolean = false) {
-        g.chats.save(Conversation(sess.convId, sess.title, sess.msgs, createdAt = sess.createdAt, updatedAt = System.currentTimeMillis(), section = sess.section.id), immediate)
+        g.chats.save(Conversation(sess.convId, sess.title, sess.msgs, createdAt = sess.createdAt, updatedAt = System.currentTimeMillis(), section = sess.section.id,
+            botId = sess.bot?.id.orEmpty(), botName = sess.bot?.name.orEmpty()), immediate)
     }
 
     private fun runAgent() {
@@ -542,6 +610,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val researchOn = sec == Section.ASK && s.deepResearch
         // v0.12: Long task mode (composer toggle) — bigger budgets + a persisted run record.
         val longTaskOn = sec == Section.ASK && s.longTask
+        // Phase 2 (background): EVERY run gets a durable record (kind long/ask/build),
+        // so a swipe-away or process death leaves a one-tap resume instead of silence.
+        val runKind = if (longTaskOn) "long" else if (sec == Section.BUILD) "build" else "ask"
         // P1-3 Turbo (server): this task's shell work runs on the user's own server when set up.
         val turboOn = sec == Section.ASK && s.turbo
         val quick = sec == Section.ASK && !researchOn && com.mazharansari.axion.agent.IntentGate.isSmallTalk(u.text, intent)
@@ -557,6 +628,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             kind = if (sec == Section.BUILD) com.mazharansari.axion.work.RunRegistry.Kind.BUILD else com.mazharansari.axion.work.RunRegistry.Kind.ASK,
             ownerId = if (sec == Section.BUILD) projectId else convId,
             title = title, section = sec, createdAt = createdAt, pid = projectId,
+            bot = activeBot,
             buf = StreamBuffer(),
             msgs = messages + Message(aid, Role.ASSISTANT, status = MsgStatus.STREAMING, thinkingStartedAt = started, createdAt = started),
         )
@@ -572,7 +644,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         sess.job = viewModelScope.launch {
             // Bot Store (Phase 1): the bot this run answers as, captured at send time — its
             // given name is the parent bot's name for this run ("Axion" when no bot is active).
-            val bot = activeBot
+            // Phase 2: read from the session, not the live activeBot — the user may have
+            // switched chats (and bots) while this run works in the background.
+            val bot = sess.bot
             val botName = bot?.name ?: s.assistantName.ifBlank { "Axion" }
             // v0.8.0 (Phase C): register this run so WorkService keeps the process alive in the
             // background and the projects list / chat drawer can show it as Working.
@@ -581,7 +655,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             // Swarm (Phase 1): the parent bot's card appears in the Bots section the moment the run starts.
             g.bots.registerParent("run-$aid", convId, botName, sess.title)
             var lastWorkerCount = -1   // last worker count shown in the run title
-            if (longTaskOn) g.taskRuns.start(u.text, convId)   // v0.12: survives an app kill; see interruptedTask
+            g.taskRuns.start(runKind, u.text, convId)   // Phase 2: survives an app kill; see interruptedTask
             // UI ticker: at most ~16 updates/s however fast tokens arrive, so long answers never jank the list.
             val ticker = launch { while (isActive) { delay(45); flush(sess) } }   // v0.4: ~22 UI updates/s while streaming
             val sink = object : AgentSink {
@@ -659,7 +733,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             catch (e: LlmException) { status = MsgStatus.ERROR; error = friendly(e) }
             catch (e: Throwable) { status = MsgStatus.ERROR; error = e.message ?: e.toString() }
             ticker.cancel()
-            if (buf.closed) { g.bots.parentFinished("run-$aid", BotStatus.FAILED, "Stopped"); if (longTaskOn) g.taskRuns.finish("interrupted"); sessions.remove(convId); refreshRunning(); return@launch }   // Stop already froze this reply into its own conversation
+            if (buf.closed) { g.bots.parentFinished("run-$aid", BotStatus.FAILED, "Stopped"); g.taskRuns.finish(runKind, convId, "interrupted"); sessions.remove(convId); refreshRunning(); return@launch }   // Stop already froze this reply into its own conversation
             withContext(NonCancellable) {
                 buf.dirty = true; flush(sess)
                 sess.msgs = sess.msgs.map {
@@ -676,7 +750,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 refreshRunning()
                 if (requestAt > 0) lastTiming = (requestAt - tapped) to (if (firstAt > 0) firstAt - tapped else -1L)
                 persist(sess, immediate = true)
-                if (longTaskOn) g.taskRuns.finish(if (status == MsgStatus.DONE) "done" else "interrupted")   // v0.12
+                g.taskRuns.finish(runKind, convId, if (status == MsgStatus.DONE) "done" else "interrupted")   // Phase 2: every run settles its record
                 if (status == MsgStatus.DONE && s.autoRead) sess.msgs.firstOrNull { it.id == aid }?.let { speak(it) }
             }
         }
@@ -777,6 +851,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val createdAt: Long,
         /** The Build project this run works in (null for Ask). Captured at send — never re-read. */
         val pid: String?,
+        /** The bot this run answers as (null = plain Axion). Captured at send — never re-read. */
+        val bot: com.mazharansari.axion.data.BotDefinition?,
         val buf: StreamBuffer,
         var msgs: List<Message>,
     ) {
@@ -904,7 +980,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun speak(m: Message) {
         if (g.speaker.speakingId.value == m.id) { g.speaker.stop(); return }
-        g.speaker.speak(m.id, m.text)
+        // Phase 2: read aloud the decoded text — never raw %XX escapes.
+        g.speaker.speak(m.id, com.mazharansari.axion.ui.chat.decodeIfEncoded(m.text))
     }
 
     /** One spoken turn of the Live call ("same voice" mode): a short spoken answer, web search allowed, fast models first. */

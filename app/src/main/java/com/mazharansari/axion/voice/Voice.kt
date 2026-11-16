@@ -22,6 +22,8 @@ class SpeechInput(private val ctx: Context, language: () -> String) {
     private val rec = VoiceRecognizer(ctx, language)
     val state = rec.state
     val listening: StateFlow<Boolean> = rec.state.map { it.listening }.stateIn(scope, SharingStarted.Eagerly, false)
+    /** Phase 2: true between Send and the final words coming back (mic ignores taps meanwhile). */
+    val finishing: StateFlow<Boolean> = rec.state.map { it.finishing }.stateIn(scope, SharingStarted.Eagerly, false)
     val partial: StateFlow<String> = rec.state.map { it.fullText }.stateIn(scope, SharingStarted.Eagerly, "")
     /** 0..1, read per frame by the waveform. */
     fun level(): Float = rec.level

@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -31,6 +32,8 @@ import com.mazharansari.axion.ui.theme.P
 import com.mazharansari.axion.ui.theme.Type
 
 val LocalHaptics = staticCompositionLocalOf { true }
+/** Phase 2: a soft click sound on taps. Default ON; Settings → Appearance turns it off. */
+val LocalTouchSound = staticCompositionLocalOf { true }
 
 /** Grok's own icon set (24-unit grid, 2-unit strokes) — the vector drawables shipped in Grok 1.2.51, renamed gk_*. */
 object Gk {
@@ -71,7 +74,15 @@ fun GkIcon(@DrawableRes id: Int, desc: String? = null, size: Dp = 24.dp, tint: C
 @Composable
 fun rememberTap(onClick: () -> Unit): () -> Unit {
     val h = LocalHapticFeedback.current; val on = LocalHaptics.current
-    return remember(onClick, on) { { if (on) h.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() } }
+    val soundOn = LocalTouchSound.current; val view = LocalView.current
+    return remember(onClick, on, soundOn) { {
+        if (on) h.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        // Phase 2: a soft click on every tap (the system click sound, so it
+        // follows the phone's own sound settings) — off when the user turns
+        // Touch sound off in Settings → Appearance.
+        if (soundOn) runCatching { view.playSoundEffect(android.view.SoundEffectConstants.CLICK) }
+        onClick()
+    } }
 }
 
 @Composable
@@ -168,9 +179,9 @@ fun SettingsRow(
     }
 }
 
-/** Grok switch: white thumb on a white track when on, grey when off. */
+/** Axion switch: indigo track when on, grey when off; white thumb. */
 @Composable
-fun GrokSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+fun AxionSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
     val p = P
     val x by androidx.compose.animation.core.animateDpAsState(if (checked) 20.dp else 0.dp, label = "sw")
     val track by androidx.compose.animation.animateColorAsState(if (checked) p.accent else if (p.isDark) Color(0xFF3A3A3A) else Color(0xFFD9D9D9), label = "tr")
@@ -181,16 +192,16 @@ fun GrokSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
 
 @Composable
 fun ToggleRow(@DrawableRes icon: Int?, title: String, subtitle: String? = null, checked: Boolean, onChange: (Boolean) -> Unit) {
-    SettingsRow(icon, title, subtitle, chevron = false, trailing = { GrokSwitch(checked, onChange) }, onClick = { onChange(!checked) })
+    SettingsRow(icon, title, subtitle, chevron = false, trailing = { AxionSwitch(checked, onChange) }, onClick = { onChange(!checked) })
 }
 
 @Composable
 fun Divider(start: Dp = 52.dp) = Box(Modifier.padding(start = start).fillMaxWidth().height(1.dp).background(P.border))
 
 @Composable
-fun Avatar(letter: String, size: Dp = 36.dp, bg: Color = if (P.isDark) Color(0xFF3A3A3A) else Color(0xFFDFDFDF)) {
+fun Avatar(letter: String, size: Dp = 36.dp, bg: Color = P.accent.copy(alpha = 0.16f)) {
     Box(Modifier.size(size).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
-        Text(letter.take(1).uppercase(), color = P.text, fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.SemiBold, fontFamily = com.mazharansari.axion.ui.theme.GoogleSans)
+        Text(letter.take(1).uppercase(), color = P.accent, fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.SemiBold, fontFamily = com.mazharansari.axion.ui.theme.GoogleSans)
     }
 }
 

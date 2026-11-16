@@ -16,7 +16,10 @@ data class AppSettings(
     val textScale: Float = 1f,
     val haptics: Boolean = true,
     val hapticsStreaming: Boolean = false,
-    val appLanguage: String = "English",
+    /** Phase 2: a soft click sound on taps. Default ON; Settings → Appearance turns it off. */
+    val touchSound: Boolean = true,
+    // Phase 2 (settings audit): appLanguage REMOVED — the picker saved a value no code ever
+    // read, so it was a fake setting. Old settings.json files still decode (ignoreUnknownKeys).
     val speechLang: String = "ur-PK",    // dictation + read-aloud language
     val voice: String = "Kore",          // Gemini prebuilt voice
     val naturalVoice: Boolean = false,    // Gemini TTS when a Gemini key exists, else Android TTS
@@ -95,7 +98,7 @@ class ConversationStore(ctx: Context) {
     }
 
     private fun meta(c: Conversation) = ConversationMeta(c.id, c.title, c.pinned, c.updatedAt,
-        c.messages.lastOrNull { it.role == Role.ASSISTANT }?.text?.take(80).orEmpty(), c.section)
+        c.messages.lastOrNull { it.role == Role.ASSISTANT }?.text?.take(80).orEmpty(), c.section, c.botId, c.botName)
 
     suspend fun load(id: String): Conversation? = withContext(Dispatchers.IO) {
         runCatching { json.decodeFromString<Conversation>(File(dir, "$id.json").readText()) }.getOrNull()?.let(::settle)

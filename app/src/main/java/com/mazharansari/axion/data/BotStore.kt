@@ -44,6 +44,11 @@ data class BotDefinition(
     val sourceName: String = "",
     val sourceUrl: String = "",
     val license: String = "",
+    /**
+     * Phase 2: the bot's logo, chosen by the user — "builtin:<id>" or
+     * "file:<path>" (see [BotLogo]); "" = the bot's initial. Stored in bots.json.
+     */
+    val logo: String = "",
 ) {
     /** The system-prompt addition for a chat run as this bot (Axion's own agent loop). */
     fun promptBlock(): String = buildString {
@@ -94,6 +99,13 @@ class BotDefinitionStore(private val dir: File) {
     /** Uninstall (store bot) or delete (user-created bot). */
     fun remove(id: String) {
         _definitions.value = _definitions.value.filterNot { it.id == id }
+        persist()
+    }
+
+    /** Phase 2: change a bot's logo (a builtin id string or a "file:" path). No-op for an unknown id. */
+    fun setLogo(id: String, logo: String) {
+        if (_definitions.value.none { it.id == id }) return
+        _definitions.value = _definitions.value.map { if (it.id == id) it.copy(logo = logo) else it }
         persist()
     }
 

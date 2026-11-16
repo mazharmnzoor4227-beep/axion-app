@@ -42,6 +42,8 @@ sealed interface Route {
     data object Telegram : Route
     // P1 — Bot Store (installable bot definitions)
     data object BotStore : Route
+    // Phase 2 — Bots section (menu only; the top bar is Ask | Build).
+    data object Bots : Route
 }
 
 /** v0.5.2: routes shown with FLAG_SECURE (a key, token or password can be typed or shown on them). */

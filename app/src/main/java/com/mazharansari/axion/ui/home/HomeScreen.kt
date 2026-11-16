@@ -67,7 +67,7 @@ import java.io.File
 import kotlin.math.roundToInt
 
 /**
- * Home = Grok's shell: full-screen drawer that slides over from the left, a transparent top bar
+ * Home = Axion's shell: full-screen drawer that slides over from the left, a transparent top bar
  * (☰ · title · ✎) floating over a bg→transparent fade, and the composer floating over the bottom fade.
  */
 @Composable
@@ -83,7 +83,7 @@ fun HomeScreen(vm: ChatViewModel, navigate: (Route) -> Unit, initialDrawer: Bool
     }
     // Opening a thread from the menu lands on its own tab.
     LaunchedEffect(vm.conversationId, vm.section) {
-        if (vm.conversationId != null) { if (vm.section == com.mazharansari.axion.ui.Section.BUILD) tab = 2 else if (tab == 2 || tab == 3) tab = 0 }
+        if (vm.conversationId != null) { if (vm.section == com.mazharansari.axion.ui.Section.BUILD) tab = 2 else if (tab == 2) tab = 0 }
     }
     var drawerOpen by remember { mutableStateOf(initialDrawer) }
     val widthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
@@ -106,11 +106,6 @@ fun HomeScreen(vm: ChatViewModel, navigate: (Route) -> Unit, initialDrawer: Bool
                 when (t) {
                     0 -> ChatPane(vm, navigate, onBuild = { switchTab(2) }, onImagine = { tab = 1 })
                     1 -> Column(Modifier.fillMaxSize()) { Spacer(Modifier.statusBarsPadding().height(64.dp)); ImaginePane(vm) }
-                    // Swarm (Phase 1): the Bots section — every live bot (parent + workers), installed bots, finished workers.
-                    3 -> Column(Modifier.fillMaxSize()) {
-                        Spacer(Modifier.statusBarsPadding().height(64.dp))
-                        com.mazharansari.axion.ui.bots.BotsPane(vm, navigate, onStartBot = { bot -> switchTab(0); vm.startBotChat(bot) })
-                    }
                     // v0.4: a Build thread shows as a chat run by Antigravity; otherwise Build's start page (or its setup card)
                     // v0.5: Build = projects. Inside a project: Chat | Files | Preview; otherwise the projects list (or its setup card).
                     else -> if (vm.projectId != null) com.mazharansari.axion.ui.build.ProjectWorkspace(vm, navigate)
@@ -119,7 +114,7 @@ fun HomeScreen(vm: ChatViewModel, navigate: (Route) -> Unit, initialDrawer: Bool
                 }
             }
             UpdateBanner(vm, navigate)
-            if (!(tab == 2 && vm.projectId != null)) TopBar(tab, empty = vm.messages.isEmpty(), onTab = { switchTab(it) }, onMenu = { drawerOpen = true }, onNew = { if (tab == 2) vm.newChat(com.mazharansari.axion.ui.Section.BUILD) else { vm.newChat(com.mazharansari.axion.ui.Section.ASK); tab = 0 } })
+            if (!(tab == 2 && vm.projectId != null)) TopBar(tab, onTab = { switchTab(it) }, onMenu = { drawerOpen = true }, onNew = { if (tab == 2) vm.newChat(com.mazharansari.axion.ui.Section.BUILD) else { vm.newChat(com.mazharansari.axion.ui.Section.ASK); tab = 0 } })
             vm.viewingHtml?.let { a -> com.mazharansari.axion.ui.chat.HtmlPreview(a, onClose = { vm.viewingHtml = null }) }   // axion-p1.3
             vm.viewingPdf?.let { a ->
                 val ctx = LocalContext.current
@@ -141,11 +136,12 @@ fun HomeScreen(vm: ChatViewModel, navigate: (Route) -> Unit, initialDrawer: Bool
 
 /**
  * ☰ circle · Ask | Build · ✎ circle. v0.4 (mazhar 2:08 PM): he only wanted Imagine out of the top bar — the v0.3
- * segmented tabs come back as "Ask | Build" (Grok's tab style: 18 sp semibold, 27 dp apart, 2.5 dp bar under the
+ * segmented tabs come back as "Ask | Build" (Axion's tab style: 18 sp semibold, 27 dp apart, 2.5 dp bar under the
  * current one). Imagine opens from the + menu; there the middle reads "‹ Imagine" and tapping it returns to Ask.
+ * Phase 2: Bots is NOT a tab any more — it lives only in the hamburger menu (Route.Bots).
  */
 @Composable
-private fun TopBar(tab: Int, empty: Boolean, onTab: (Int) -> Unit, onMenu: () -> Unit, onNew: () -> Unit) {
+private fun TopBar(tab: Int, onTab: (Int) -> Unit, onMenu: () -> Unit, onNew: () -> Unit) {
     val p = P
     // v0.5.2 (mazhar's test): solid bar — chat text no longer shows through the Ask | Build switch while scrolling.
     Box(Modifier.fillMaxWidth().background(p.bg)) {
@@ -163,8 +159,7 @@ private fun TopBar(tab: Int, empty: Boolean, onTab: (Int) -> Unit, onMenu: () ->
                     Box(Modifier.size(width = 16.dp, height = 2.5.dp).clip(RoundedCornerShape(50)).background(p.dim))
                 }
             } else Row(horizontalArrangement = Arrangement.spacedBy(27.dp), verticalAlignment = Alignment.Top) {
-                // Swarm (Phase 1): "Bots" sits between Ask and Build.
-                listOf(0 to "Ask", 3 to "Bots", 2 to "Build").forEach { (i, label) ->
+                listOf(0 to "Ask", 2 to "Build").forEach { (i, label) ->
                     val sel = tab == i
                     val tap = rememberTap { onTab(i) }
                     val c by animateColorAsState(if (sel) p.text else p.dim, tween(160), label = "tab")
@@ -176,7 +171,9 @@ private fun TopBar(tab: Int, empty: Boolean, onTab: (Int) -> Unit, onMenu: () ->
                 }
             }
             Spacer(Modifier.weight(1f))
-            CircleButton(if (empty && tab == 0) Gk.eyeOff else Gk.newChat, if (empty && tab == 0) "Private chat" else "New chat", onClick = onNew)
+            // Phase 2 (dead UI): the old "Private chat" eyeOff branch is gone — both branches
+            // of that condition called the same onNew, so the eye icon was a dead affordance.
+            CircleButton(Gk.newChat, "New chat", onClick = onNew)
         }
     }
 }
@@ -191,6 +188,7 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
     val settings by g.settings.state.collectAsState()
     val connectors by g.connectors.list.collectAsState()
     val listening by g.speech.listening.collectAsState()
+    val finishing by g.speech.finishing.collectAsState()
     val partial by g.speech.partial.collectAsState()
     val dictation by g.speech.state.collectAsState()
     LaunchedEffect(dictation.error) { dictation.error?.let { vm.toast = it } }
@@ -217,19 +215,40 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
     val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(6)) { uris -> uris.forEach { vm.addAttachment(it) } }
     var cameraFile by remember { mutableStateOf<File?>(null) }
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) cameraFile?.let { vm.addFile(it) } }
-    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (!ok) vm.toast = "Mic permission is needed for dictation" }
+    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        // Phase 2 voice: granting the permission starts listening at once — the
+        // old callback did nothing on grant, so the first mic tap after install
+        // looked dead and the user had to tap again.
+        if (ok) g.speech.start() else vm.toast = "Mic permission is needed for dictation"
+    }
     val camPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (!ok) vm.toast = "Camera permission is needed" }
 
     val last = messages.lastOrNull()
     var follow by remember { mutableStateOf(true) }
     LaunchedEffect(list.isScrollInProgress) { if (!list.isScrollInProgress) follow = !list.canScrollForward }
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) { follow = true; list.animateScrollToItem(messages.lastIndex) } }
+    // Phase 2 (WhatsApp-style chats): per-conversation scroll, best-effort. Opening a chat
+    // restores where you left it (unless it is still running — then the end stays in view);
+    // leaving saves the position. New messages while a run streams still follow the end.
+    var restoredFor by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(vm.conversationId) {
+        onDispose { vm.saveScroll(vm.conversationId, list.firstVisibleItemIndex) }
+    }
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            if (restoredFor != vm.conversationId) {
+                restoredFor = vm.conversationId
+                val idx = vm.scrollFor(vm.conversationId)
+                if (idx > 0 && !vm.running) { list.scrollToItem(idx); follow = false }
+                else { follow = true; list.animateScrollToItem(messages.lastIndex) }
+            } else { follow = true; list.animateScrollToItem(messages.lastIndex) }
+        }
+    }
     LaunchedEffect(last?.text?.length, last?.steps?.size, last?.artifacts?.size) {
         if (vm.running && follow && messages.isNotEmpty()) list.scrollToItem(messages.lastIndex, 1_000_000)
     }
     val scope = rememberCoroutineScope()
 
-    // v0.3.1 — Grok's read-aloud pill, pull-up-for-new-chat and in-app PDF viewer
+    // v0.3.1 — Axion's read-aloud pill, pull-up-for-new-chat and in-app PDF viewer
     val ra = com.mazharansari.axion.voice.ReadAloudPlayer
     val imeVisible = WindowInsets.isImeVisible
     val pillVisible = speakingId != null && messages.any { it.id == speakingId } && !imeVisible
@@ -238,7 +257,7 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
     var speedAnchor by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     LaunchedEffect(vm.debugViewer) { vm.debugViewer?.let { n -> vm.viewingPdf = messages.flatMap { it.artifacts }.firstOrNull { it.name == n } } }
     val view = androidx.compose.ui.platform.LocalView.current
-    val thresholdPx = with(density) { 132.dp.toPx() }   // Grok lifts the chat ≈135 dp before "New chat" arms (recording 0:01–0:02)
+    val thresholdPx = with(density) { 132.dp.toPx() }   // the chat lifts ≈135 dp before "New chat" arms
     var pullPx by remember { mutableFloatStateOf(0f) }
     var armed by remember { mutableStateOf(false) }
     val debugPull = vm.debugPull
@@ -261,7 +280,7 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                 return androidx.compose.ui.geometry.Offset.Zero
             }
             override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                // dragging up past the end of the chat: lift it with resistance (Grok's rubber band)
+                // dragging up past the end of the chat: lift it with resistance (the rubber band)
                 if (available.y < 0f && draggingNow && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && !vm.running) {
                     val resist = 0.62f * (1f - (pullPx / (thresholdPx * 2.4f)).coerceIn(0f, 0.8f))
                     pullPx += -available.y * resist
@@ -283,12 +302,11 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
 
     CompositionLocalProvider(LocalHaze provides haze) {
         Box(Modifier.fillMaxSize().imePadding().onGloballyPositioned { val b = it.boundsInRoot(); boxBottomPx = b.bottom; boxTopPx = b.top }) {
-            // v0.5.1 (mazhar 3:36/3:52 PM: Thinking and the last message sat glued to the composer). Grok's recording
-            // (1033) measured 88 px at 480 px wide = ~75 dp from the last message row to the composer, keyboard open
-            // or closed. The list's bottom padding holds that space below the last item at all times — streaming,
+            // v0.5.1 (mazhar 3:36/3:52 PM: Thinking and the last message sat glued to the composer). Measured
+            // 88 px at 480 px wide = ~75 dp from the last message row to the composer, keyboard open or closed. The list's bottom padding holds that space below the last item at all times — streaming,
             // auto-scroll, keyboard open (the Box is imePadding'd, so the composer and this gap move up together).
             val bottomPad = if (ChatGap.debugLegacy) with(density) { composerInnerH.toDp() } + 12.dp else with(density) { composerH.toDp() } + ChatGap.LIST_BOTTOM
-            // Grok: when the player pill (or anything) grows the bottom stack while you're at the end, the end stays in view above it.
+            // when the player pill (or anything) grows the bottom stack while you're at the end, the end stays in view above it.
             LaunchedEffect(composerH) { if (follow && messages.isNotEmpty() && !list.isScrollInProgress) list.scrollToItem(messages.lastIndex, 1_000_000) }
             Box(Modifier.fillMaxSize().haze(haze)) {
                 if (messages.isEmpty()) (emptyContent ?: { EmptyHome() })()
@@ -299,10 +317,10 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                         else AssistantMessage(
                             m, isLast = m.id == messages.last().id, speaking = speakingId == m.id,
                             onOpenThoughts = { thoughts = m.id },
-                            onCopy = { vm.toast = if (com.mazharansari.axion.security.SecureClipboard.copy(ctx, "Axion", m.text)) "Copied — it has a key in it, so the clipboard clears in 45 s" else "Copied" },
+                            onCopy = { vm.toast = if (com.mazharansari.axion.security.SecureClipboard.copy(ctx, "Axion", decodeIfEncoded(m.text))) "Copied — it has a key in it, so the clipboard clears in 45 s" else "Copied" },
                             onSpeak = { vm.speak(m) },
                             onRegenerate = { vm.regenerate() },
-                            onShare = { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, m.text), "Share")) },
+                            onShare = { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, decodeIfEncoded(m.text)), "Share")) },
                             onRate = { vm.rate(m.id, it) },
                             onOpenFile = { a -> if (a.mime == "application/pdf") vm.viewingPdf = a else if (a.mime == "text/html" || a.name.endsWith(".html", true)) vm.viewingHtml = a else openFile(ctx, a) },   // axion-p1.3
                             onDownload = { a -> vm.toast = FileActions.download(ctx, a) },
@@ -319,10 +337,10 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
             // v0.5.1: measure the whole bottom stack (nav bar + 6 dp included) — measuring inside the padding left the list
             // short by the nav-bar height, which is part of why the last message sat on the composer.
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { composerH = it.height }.navigationBarsPadding().padding(bottom = 6.dp).onSizeChanged { composerInnerH = it.height }) {
-                // Grok: 48 dp #1F1F1F chevron, 12 dp from the right edge, 10 dp above the player pill (or the composer).
+                // 48 dp chevron, 12 dp from the right edge, 10 dp above the player pill (or the composer).
                 AnimatedVisibility(messages.isNotEmpty() && list.canScrollForward && !vm.running && pullPx == 0f, enter = fadeIn() + scaleIn(initialScale = 0.8f), exit = fadeOut() + scaleOut(targetScale = 0.8f),
                     modifier = Modifier.align(Alignment.End).padding(end = 12.dp, bottom = 10.dp)) {
-                    CircleButton(Gk.chevronDown, "Scroll to bottom", size = 48.dp, iconSize = 22.dp, bg = if (p.isDark) Color(0xFF1F1F1F) else Color(0xFFF2F2F2)) { scope.launch { list.animateScrollToItem(messages.lastIndex, 1_000_000) } }
+                    CircleButton(Gk.chevronDown, "Scroll to bottom", size = 48.dp, iconSize = 22.dp, bg = p.surface) { scope.launch { list.animateScrollToItem(messages.lastIndex, 1_000_000) } }
                 }
                 AnimatedVisibility(pillVisible, modifier = Modifier.align(Alignment.CenterHorizontally),
                     enter = fadeIn(tween(180)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 2 } + expandVertically(tween(240), expandFrom = Alignment.Bottom),
@@ -339,13 +357,14 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                         )
                     }
                 }
-                // v0.12: a long task the app lost mid-way gets a visible way back, above the composer.
+                // Phase 2 (background): a run the app lost mid-way gets a visible way back, above the composer.
+                // The record kind says what was lost — long task, Build turn, or plain chat turn.
                 vm.interruptedTask?.let { rec ->
                     Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card).border(1.dp, p.border, RoundedCornerShape(16.dp)).padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         GkIcon(Gk.history, null, 18.dp, p.text2); Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("A long task was interrupted", style = Type.small.copy(fontWeight = FontWeight.SemiBold), color = p.text)
+                            Text(when (rec.kind) { "build" -> "A build was interrupted"; "long" -> "A long task was interrupted"; else -> "A chat was interrupted" }, style = Type.small.copy(fontWeight = FontWeight.SemiBold), color = p.text)
                             Text(rec.goal.take(90), style = Type.tiny, color = p.text2, maxLines = 1)
                         }
                         TextButton(onClick = { vm.resumeInterruptedTask() }) { Text("Open chat", color = p.accent) }
@@ -408,7 +427,8 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                     // Bot Store (Phase 1): this chat runs as an installed/created bot — say so, with a way out.
                     vm.activeBot?.let { bot ->
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 2.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            GkIcon(Gk.brain, null, 16.dp, p.accent); Spacer(Modifier.width(6.dp))
+                            com.mazharansari.axion.ui.bots.BotLogoView(bot.logo, bot.name, 28.dp)
+                            Spacer(Modifier.width(8.dp))
                             Text("Chatting as ${bot.name}", style = Type.tiny, color = p.text2, modifier = Modifier.weight(1f), maxLines = 1)
                             TextButton(onClick = { vm.exitBot() }) { Text("Exit bot", color = p.text2, style = Type.tiny) }
                         }
@@ -434,12 +454,29 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                     listening = listening, level = { g.speech.level() }, partial = partial,
                     onPlus = { model = false; plus = !plus }, onMode = { plus = false; model = !model },
                     onMic = {
-                        if (listening) g.speech.finish { t -> if (t.isNotBlank()) vm.draft = (vm.draft + " " + t).trim() }
+                        // Phase 2 voice: one tap opens listening; while the final
+                        // words are coming back (finishing), taps are ignored.
+                        if (finishing) {
+                            // The final words are still coming back — ignore the tap.
+                        } else if (listening) g.speech.finish { t -> if (t.isNotBlank()) vm.draft = (vm.draft + " " + t).trim() }
                         else if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) micPerm.launch(Manifest.permission.RECORD_AUDIO)
                         else if (!g.speech.available()) vm.toast = "No speech recogniser on this phone"
                         else g.speech.start()
                     },
                     onMicCancel = { g.speech.cancel() },
+                    // Phase 2 voice: speak → Send — finish and send in the same tap, first time.
+                    finishing = finishing,
+                    onMicSend = {
+                        if (listening && !finishing) {
+                            g.speech.finish { t ->
+                                if (t.isNotBlank()) {
+                                    vm.draft = (vm.draft + " " + t).trim()
+                                    vm.send()
+                                }
+                            }
+                        }
+                    },
+                    softMessage = dictation.reconnectMessage ?: dictation.softMessage ?: "",
                     onSend = { vm.send() }, onStop = { vm.stop() }, onVoiceCall = { navigate(Route.VoiceCall) },
                     plusOpen = plus, modeOpen = model, onFocus = { vm.prewarm() },
                 )
@@ -474,7 +511,18 @@ internal fun ChatPane(vm: ChatViewModel, navigate: (Route) -> Unit, onBuild: () 
                     dismissButton = {},
                 )
             }
-            // Grok's pull-up indicator, rising from just above the composer as the chat is lifted.
+            // Phase 2 (settings audit): "Paste as File — Always ask": a giant paste waits for the choice.
+            vm.pendingPaste?.let { pasted ->
+                AlertDialog(
+                    onDismissRequest = { vm.dismissPaste() },
+                    containerColor = p.card, shape = RoundedCornerShape(24.dp),
+                    title = { Text("Send as a file?", style = Type.title, color = p.text) },
+                    text = { Text("This message is very long (${pasted.length / 1000}k characters). As a file it stays fast and the model reads it in full; as text it may fail at the provider.", style = Type.small, color = p.text2) },
+                    confirmButton = { TextButton(onClick = { vm.resolvePaste(true) }) { Text("Send as file", color = p.accent) } },
+                    dismissButton = { TextButton(onClick = { vm.resolvePaste(false) }) { Text("Send as text", color = p.text2) } },
+                )
+            }
+            // Axion's pull-up indicator, rising from just above the composer as the chat is lifted.
             NewChatPull(pullFrac, pullArmed, Modifier.align(Alignment.BottomCenter).padding(bottom = with(density) { composerH.toDp() } + 18.dp)
                 .graphicsLayer { translationY = -(pullFrac.coerceIn(0f, 1.4f) * 52.dp.toPx()) })
             // Speed list standing on the pill, its left edge on the speed capsule's left edge.
@@ -534,7 +582,7 @@ fun openFile(ctx: android.content.Context, a: Artifact) {
     }
 }
 
-/** Grok's empty home: just the logo, centred a little above middle, in dim grey (#434343). */
+/** Axion's empty home: just the logo, centred a little above middle, in dim grey. */
 @Composable
 private fun EmptyHome() {
     Box(Modifier.fillMaxSize()) {
@@ -555,7 +603,7 @@ private fun BuildChips(ready: Boolean, onAgy: () -> Unit, onTools: () -> Unit) {
                 Text("Build runs on your Google Antigravity account inside Linux on this phone. Takes a few minutes, once.", style = Type.tiny, color = p.text2)
             }
             Spacer(Modifier.width(8.dp))
-            Box(Modifier.clip(RoundedCornerShape(50)).background(Color(0xFF1D9BF0)).padding(horizontal = 14.dp, vertical = 8.dp)) { Text("Set up", style = Type.small.copy(fontWeight = FontWeight.SemiBold), color = Color.White) }
+            Box(Modifier.clip(RoundedCornerShape(50)).background(p.accent).padding(horizontal = 14.dp, vertical = 8.dp)) { Text("Set up", style = Type.small.copy(fontWeight = FontWeight.SemiBold), color = p.onAccent) }
         }
     } else Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Chip(Gk.terminal, "Developer tools", onClick = onTools)
@@ -572,7 +620,7 @@ private fun BuildChips(ready: Boolean, onAgy: () -> Unit, onTools: () -> Unit) {
 internal fun showToolsRow(messagesEmpty: Boolean, build: Boolean): Boolean = !build && !messagesEmpty
 
 /**
- * The ONE chip row above the composer on an empty chat ("Save 50% on Premium" · "Try Connectors" in Grok).
+ * The ONE chip row above the composer on an empty chat.
  * 0.9.6: the three tool toggles lead the row (after the blue key chip, when it shows), at the same
  * 44 dp height and spacing as the suggestion chips, so it reads as a single row: Research, Long task,
  * Turbo, Try Connectors, Skills, Build an app, Voice. The toggles keep their ToolChip behaviour
@@ -617,6 +665,9 @@ private fun DrawerContent(vm: ChatViewModel, onClose: () -> Unit, onOpen: (Strin
     var renaming by remember { mutableStateOf<ConversationMeta?>(null) }
     val activeRuns by vm.g.runs.active.collectAsState()   // v0.8.0: chats still working in the background get a "Working" mark
     var collapsed by remember { mutableStateOf(false) }
+    // Phase 2 (WhatsApp-style rows): a bot chat shows its logo, looked up from the bot store.
+    val myBots by vm.g.botStore.definitions.collectAsState()
+    val logoByBot = remember(myBots) { myBots.associate { it.id to it.logo } }
     val filtered = remember(index, q) { index.filter { it.section != "worker" && (q.isBlank() || it.title.contains(q, true) || it.preview.contains(q, true)) } }
     val pinned = filtered.filter { it.pinned }; val rest = filtered.filterNot { it.pinned }
     Box(Modifier.fillMaxSize().background(p.page2)) {
@@ -635,6 +686,9 @@ private fun DrawerContent(vm: ChatViewModel, onClose: () -> Unit, onOpen: (Strin
                     DrawerTile(Gk.library, "Library") { navigate(Route.Files) }
                     DrawerTile(Gk.skills, "Skills") { navigate(Route.Skills) }
                     DrawerTile(Gk.connectors, "Connectors") { navigate(Route.Connectors) }
+                    // Phase 2: Bots lives ONLY in this menu — the top bar is Ask | Build.
+                    DrawerTile(Gk.agent, "Bots") { navigate(Route.Bots) }
+                    DrawerTile(Gk.grid, "Bot Store") { navigate(Route.BotStore) }
                 }
             }
             if (connectors.isEmpty()) item(key = "banner") {
@@ -652,10 +706,10 @@ private fun DrawerContent(vm: ChatViewModel, onClose: () -> Unit, onOpen: (Strin
             }
             if (pinned.isNotEmpty()) {
                 item(key = "h_pinned") { DrawerHeader("Pinned", null) {} }
-                items(pinned, key = { "p" + it.id }) { c -> ConvRow(c, c.id == vm.conversationId, activeRuns.any { it.ownerId == c.id }, { onOpen(c.id) }, { menuFor = c }) }
+                items(pinned, key = { "p" + it.id }) { c -> ConvRow(c, c.id == vm.conversationId, activeRuns.any { it.ownerId == c.id }, logoByBot[c.botId].orEmpty(), { onOpen(c.id) }, { menuFor = c }) }
             }
             item(key = "h_conv") { DrawerHeader("Conversations", collapsed) { collapsed = !collapsed } }
-            if (!collapsed) items(rest, key = { it.id }) { c -> ConvRow(c, c.id == vm.conversationId, activeRuns.any { it.ownerId == c.id }, { onOpen(c.id) }, { menuFor = c }) }
+            if (!collapsed) items(rest, key = { it.id }) { c -> ConvRow(c, c.id == vm.conversationId, activeRuns.any { it.ownerId == c.id }, logoByBot[c.botId].orEmpty(), { onOpen(c.id) }, { menuFor = c }) }
             if (index.isEmpty()) item { Text("Your conversations will appear here", style = Type.small.copy(fontSize = 15.sp), color = p.text3, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) }
         }
         // bottom bar over a fade: Search pill · settings · new chat
@@ -716,28 +770,32 @@ private fun DrawerHeader(label: String, collapsed: Boolean?, onToggle: () -> Uni
     }
 }
 
+/**
+ * Phase 2 (WhatsApp-style): a conversation row is a friend — logo/avatar, name, last
+ * message, time, and a green working dot while its run is still going in the
+ * background. Long-press opens the menu (Delete / Rename / Pin / Share); there is no
+ * visible ⋮ button any more, exactly like WhatsApp.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ConvRow(c: ConversationMeta, selected: Boolean, working: Boolean, onOpen: () -> Unit, onMenu: () -> Unit) {
+private fun ConvRow(c: ConversationMeta, selected: Boolean, working: Boolean, botLogo: String = "", onOpen: () -> Unit, onMenu: () -> Unit) {
     val p = P
     Row(Modifier.fillMaxWidth().padding(horizontal = 9.dp).clip(RoundedCornerShape(12.dp)).background(if (selected) p.card else Color.Transparent)
-        .combinedClickable(onClick = onOpen, onLongClick = onMenu).padding(start = 13.dp, end = 4.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        .combinedClickable(onClick = onOpen, onLongClick = onMenu).padding(start = 13.dp, end = 10.dp, top = 9.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (c.botId.isNotBlank()) com.mazharansari.axion.ui.bots.BotLogoView(botLogo, c.botName.ifBlank { c.title }, 46.dp)
+        else Avatar(c.title.ifBlank { "A" }, 46.dp)
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(c.title, style = Type.body.copy(fontSize = 17.sp, lineHeight = 22.sp), color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(dateLabel(c.updatedAt), style = Type.small.copy(fontSize = 14.sp), color = p.text2, modifier = Modifier.padding(top = 2.dp))
-            // v0.8.0 (Phase C): this chat's turn is still running in the background.
-            if (working) Text("Working", style = Type.tiny.copy(fontWeight = FontWeight.SemiBold), color = Color(0xFF3FB950), modifier = Modifier.padding(top = 2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(c.title, style = Type.body.copy(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold), color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(chatTimeLabel(c.updatedAt), style = Type.tiny, color = if (working) p.accent else p.text3, modifier = Modifier.padding(start = 8.dp))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                if (working) { Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF3FB950))); Spacer(Modifier.width(6.dp)) }
+                Text(if (working) "Working…" else c.preview.ifBlank { "No messages yet" }, style = Type.small.copy(fontSize = 14.sp), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
         }
-        IconTap(Gk.more, "More", 18.dp, p.text2, 40.dp, onMenu)
     }
-}
-
-private fun dateLabel(t: Long): String {
-    val now = System.currentTimeMillis()
-    val cal = java.util.Calendar.getInstance()
-    val today = cal.apply { timeInMillis = now; set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }.timeInMillis
-    return if (t >= today) java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH).format(java.util.Date(t))
-    else java.text.SimpleDateFormat("dd MMM", java.util.Locale.ENGLISH).format(java.util.Date(t))
 }
 
 

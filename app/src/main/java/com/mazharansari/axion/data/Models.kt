@@ -95,6 +95,13 @@ data class Conversation(
     val updatedAt: Long = 0,
     /** v0.4: which engine owns this thread — "ask" (API keys) or "build" (Antigravity). See [com.mazharansari.axion.ui.Section]. */
     val section: String = "ask",
+    /**
+     * Phase 2: the installed/created bot this chat runs as ("" = plain Axion).
+     * The chat list shows the bot's name and logo for these chats, and opening
+     * one restores the bot instead of dropping back to plain Axion.
+     */
+    val botId: String = "",
+    val botName: String = "",
 )
 
 @Serializable
@@ -105,6 +112,9 @@ data class ConversationMeta(
     val updatedAt: Long,
     val preview: String = "",
     val section: String = "ask",
+    /** Phase 2: the bot this chat runs as ("" = plain Axion). */
+    val botId: String = "",
+    val botName: String = "",
 )
 
 /** One match from [ConversationStore.search] (v0.10 session search): which chat, who said it, and the words around the match. */

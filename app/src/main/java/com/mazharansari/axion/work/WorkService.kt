@@ -25,7 +25,10 @@ import com.mazharansari.axion.MainActivity
  *
  * Honest platform limits: Settings → Force stop ends everything (Android rule, no app can
  * override it), and a phone reboot mid-run does not auto-resume — the partial reply is saved
- * and marked interrupted, as today.
+ * and marked interrupted, as today. What START_STICKY buys: if Android kills the SERVICE
+ * itself while work is in flight, it restarts and re-posts the notification; if the whole
+ * PROCESS dies, the durable TaskRuns record (not this service) is what makes the run
+ * resumable with one tap — a run cannot continue without its process.
  */
 class WorkService : Service() {
 
@@ -51,7 +54,10 @@ class WorkService : Service() {
         if (Build.VERSION.SDK_INT >= 29) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else startForeground(ID, n)
         acquireWake()
-        return START_NOT_STICKY
+        // Phase 2 (background): work is in flight — if Android kills the service, restart
+        // it so the notification (and the wake lock) come back with the run. The stop-all
+        // and stale-start paths below still return NOT_STICKY on purpose.
+        return START_STICKY
     }
 
     override fun onDestroy() {

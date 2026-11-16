@@ -77,7 +77,7 @@ fun BuildPane(vm: ChatViewModel, onSendToAsk: () -> Unit, navigate: (Route) -> U
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                     if (projects.isEmpty()) {
                         Column(Modifier.fillMaxWidth().padding(top = 40.dp, bottom = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(Modifier.size(58.dp).clip(CircleShape).background(p.surface), contentAlignment = Alignment.Center) { GkIcon(Gk.hammer, null, 26.dp, p.text) }
+                            Box(Modifier.size(58.dp).clip(CircleShape).background(p.accent.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) { GkIcon(Gk.hammer, null, 26.dp, p.accent) }
                             Spacer(Modifier.height(14.dp))
                             Text("Build apps and sites", style = Type.body.copy(fontSize = 17.sp), color = p.text)
                             Text("Each project gets its own folder, files, chat and preview.", style = Type.small, color = p.text2, modifier = Modifier.padding(top = 4.dp))
@@ -98,7 +98,7 @@ fun BuildPane(vm: ChatViewModel, onSendToAsk: () -> Unit, navigate: (Route) -> U
                     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         templates.forEach { t ->
                             val tap = rememberTap { go(t.name, t.prompt) }
-                            Row(Modifier.height(50.dp).clip(RoundedCornerShape(50)).background(p.surface).clickable(onClick = tap).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.height(50.dp).clip(RoundedCornerShape(50)).background(p.surface).border(1.dp, p.border, RoundedCornerShape(50)).clickable(onClick = tap).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                                 GkIcon(t.icon, null, 20.dp, t.tint); Spacer(Modifier.width(10.dp))
                                 Text(t.name, style = Type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = p.text)
                             }

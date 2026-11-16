@@ -19,12 +19,13 @@ import androidx.compose.ui.unit.sp
 import com.mazharansari.axion.R
 
 /**
- * Grok's dark palette. Hex values sampled from mazhar's three Grok recordings (480x1068, same phone) and
- * cross-checked against the grey ramp in Grok 1.2.51's own theme (FCFCFC / 9E9E9E / 636363 / 242424 / 181818).
- *  bg       #111111  chat page            surface  #1F1F1F  composer, user bubble rim
- *  chip     #282828  + button, model chip card     #242424  settings rows, drawer cards, user bubble
- *  page2    #181818  settings / drawer / sheets    border   #2D2D2D composer outline, #1F1F1F card outline
- *  text     #FCFCFC  text2 #9E9E9E (Thinking…, Loaded 1 skill)  text3 #636363  dim #6E6E6E (inactive tabs)
+ * Axion's own dark palette — deep ink neutrals with a restrained indigo-violet accent.
+ * (Phase 2: the old ramp copied another app's grey-on-white look; this one is Axion's.)
+ *  bg       #0E0F13  chat page            surface  #181A20  composer, user bubble rim
+ *  chip     #20232C  + button, model chip card     #1B1E26  settings rows, drawer cards
+ *  page2    #121419  settings / drawer / sheets    border   #262A33 composer outline
+ *  text     #F5F6F8  text2 #9BA1AD (Thinking…, Loaded 1 skill)  text3 #6B7280  dim #7A8190
+ *  accent   #6C63FF  indigo-violet — the one brand colour; onAccent #FFFFFF
  */
 @Immutable
 data class Palette(
@@ -32,28 +33,28 @@ data class Palette(
     val text: Color, val text2: Color, val text3: Color, val accent: Color, val onAccent: Color,
     val code: Color, val danger: Color, val isDark: Boolean,
     val chip: Color = surface2, val card: Color = surface, val page2: Color = sheet, val cardBorder: Color = border,
-    val dim: Color = text3, val popover: Color = sheet, val blue: Color = Color(0xFF1A5EFF),
+    val dim: Color = text3, val popover: Color = sheet, val blue: Color = Color(0xFF3B82F6),
 )
 
 val DarkPalette = Palette(
-    bg = Color(0xFF111111), surface = Color(0xFF1F1F1F), surface2 = Color(0xFF282828), sheet = Color(0xFF1C1C1C),
-    border = Color(0xFF2D2D2D), text = Color(0xFFFCFCFC), text2 = Color(0xFF9E9E9E), text3 = Color(0xFF636363),
-    accent = Color(0xFFFCFCFC), onAccent = Color(0xFF0F0F0F), code = Color(0xFF111111), danger = Color(0xFFFF4245), isDark = true,
-    chip = Color(0xFF282828), card = Color(0xFF242424), page2 = Color(0xFF181818), cardBorder = Color(0xFF1F1F1F),
-    dim = Color(0xFF6E6E6E), popover = Color(0xE6262626), blue = Color(0xFF1445DC),
+    bg = Color(0xFF0E0F13), surface = Color(0xFF181A20), surface2 = Color(0xFF20232C), sheet = Color(0xFF14161B),
+    border = Color(0xFF262A33), text = Color(0xFFF5F6F8), text2 = Color(0xFF9BA1AD), text3 = Color(0xFF6B7280),
+    accent = Color(0xFF6C63FF), onAccent = Color(0xFFFFFFFF), code = Color(0xFF0B0C10), danger = Color(0xFFFF5A5F), isDark = true,
+    chip = Color(0xFF20232C), card = Color(0xFF1B1E26), page2 = Color(0xFF121419), cardBorder = Color(0xFF23272F),
+    dim = Color(0xFF7A8190), popover = Color(0xE61B1E26), blue = Color(0xFF3B82F6),
 )
 val LightPalette = Palette(
     bg = Color(0xFFFCFCFC), surface = Color(0xFFF2F2F2), surface2 = Color(0xFFE8E8E8), sheet = Color(0xFFF7F7F7),
     border = Color(0xFFDFDFDF), text = Color(0xFF0F0F0F), text2 = Color(0xFF636363), text3 = Color(0xFF9E9E9E),
-    accent = Color(0xFF0F0F0F), onAccent = Color(0xFFFCFCFC), code = Color(0xFFF7F7F7), danger = Color(0xFFF4212E), isDark = false,
+    accent = Color(0xFF5A50E6), onAccent = Color(0xFFFCFCFC), code = Color(0xFFF7F7F7), danger = Color(0xFFF4212E), isDark = false,
     chip = Color(0xFFEDEDED), card = Color(0xFFFFFFFF), page2 = Color(0xFFF2F2F2), cardBorder = Color(0xFFE5E5E5),
-    dim = Color(0xFF9E9E9E), popover = Color(0xF2FFFFFF), blue = Color(0xFF1A5EFF),
+    dim = Color(0xFF9E9E9E), popover = Color(0xF2FFFFFF), blue = Color(0xFF3B82F6),
 )
 
 val LocalPalette = staticCompositionLocalOf { DarkPalette }
 val P: Palette @Composable @ReadOnlyComposable get() = LocalPalette.current
 
-/** Grok bundles Google Sans Flex (OFL) and maps Compose weights onto its wght axis: 400→400, 500→550, 600→600, 700→650, 800→800. */
+/** Axion bundles Google Sans Flex (OFL) and maps Compose weights onto its wght axis: 400→400, 500→550, 600→600, 700→650, 800→800. */
 @OptIn(ExperimentalTextApi::class)
 private fun flex(w: Int, axis: Int) = Font(R.font.google_sans_flex, FontWeight(w), variationSettings = FontVariation.Settings(FontVariation.weight(axis)))
 @OptIn(ExperimentalTextApi::class)
@@ -73,7 +74,7 @@ object Type {
     val mono = TextStyle(fontFamily = GoogleSansCode, fontSize = 13.sp, lineHeight = 20.sp, letterSpacing = 0.sp)
 }
 
-private val GrokTypography: Typography = Typography().let { t ->
+private val AxionTypography: Typography = Typography().let { t ->
     fun TextStyle.g() = copy(fontFamily = GoogleSans, letterSpacing = 0.sp)
     Typography(
         displayLarge = t.displayLarge.g(), displayMedium = t.displayMedium.g(), displaySmall = t.displaySmall.g(),
@@ -99,7 +100,7 @@ fun AxionTheme(theme: String = "dark", textScale: Float = 1f, content: @Composab
     )
     val d = LocalDensity.current
     CompositionLocalProvider(LocalPalette provides p, LocalDensity provides Density(d.density, d.fontScale * textScale)) {
-        MaterialTheme(colorScheme = scheme, typography = GrokTypography) {
+        MaterialTheme(colorScheme = scheme, typography = AxionTypography) {
             CompositionLocalProvider(androidx.compose.material3.LocalTextStyle provides Type.body, content = content)
         }
     }

@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.mazharansari.axion.ui.components.LocalHaptics
+import com.mazharansari.axion.ui.components.LocalTouchSound
 import com.mazharansari.axion.ui.home.HomeScreen
 import com.mazharansari.axion.ui.settings.*
 import com.mazharansari.axion.ui.theme.AxionTheme
@@ -34,7 +35,7 @@ fun AppRoot(vm: ChatViewModel) {
         0 -> com.mazharansari.axion.ui.auth.IntroScreen { vm.g.settings.update { it.copy(introShown = true) } }
         1 -> com.mazharansari.axion.ui.auth.PermissionsOnboarding({ vm.g.settings.update { it.copy(permsShown = true) } })
         else ->
-        CompositionLocalProvider(LocalHaptics provides settings.haptics) {
+        CompositionLocalProvider(LocalHaptics provides settings.haptics, LocalTouchSound provides settings.touchSound) {
             var goingBack by remember { mutableStateOf(false) }
             val nav: (Route) -> Unit = { if (stack.last() != it) { goingBack = false; stack.add(it) } }
             // v0.5.2 (mazhar's test): each screen keeps its saved state (scroll position) while it is in the stack, so
@@ -87,6 +88,7 @@ fun AppRoot(vm: ChatViewModel) {
                         Route.GitHub -> com.mazharansari.axion.ui.settings.GitHubScreen(vm, back)
                         Route.Telegram -> com.mazharansari.axion.ui.settings.TelegramScreen(vm, back)
                         Route.BotStore -> com.mazharansari.axion.ui.bots.BotStoreScreen(vm, back)
+                        Route.Bots -> com.mazharansari.axion.ui.bots.BotsScreen(vm, nav, back)
                     } }
                 }
                 // v0.8.3: while a Live call is held by the view model and the call screen is not

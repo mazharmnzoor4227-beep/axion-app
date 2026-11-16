@@ -103,7 +103,6 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
         SectionLabel("App")
         SettingsGroup {
             SettingsRow(Gk.theme, "Appearance", subtitle = s.theme.replaceFirstChar { it.uppercase() }) { nav(Route.Appearance) }
-            SettingsRow(Gk.language, "App Language", subtitle = s.appLanguage) { nav(Route.Language) }
             SettingsRow(Gk.sliders, "Advanced") { nav(Route.Advanced) }
         }
         SectionLabel("Axion")
@@ -142,7 +141,7 @@ fun SettingsScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit) {
     }
 }
 
-/** Grok Appearance (frame 0:05): theme tiles (selected = white tile, black glyph). */
+/** Appearance: theme tiles, then touch feedback (haptics + tap sound). */
 @Composable
 fun AppearanceScreen(vm: ChatViewModel, back: () -> Unit) {
     val s = settingsOf(vm); val p = P
@@ -159,20 +158,27 @@ fun AppearanceScreen(vm: ChatViewModel, back: () -> Unit) {
                 }
             }
         }
+        // Phase 2: haptics + tap sound, both on by default, both switchable here.
+        SectionLabel("Touch feedback")
+        SettingsGroup {
+            ToggleRow(Gk.haptics, "Haptic feedback", "A gentle vibration on taps", s.haptics) { on -> vm.g.settings.update { it.copy(haptics = on) } }
+            ToggleRow(Gk.speaker, "Touch sound", "A soft click sound on taps", s.touchSound) { on -> vm.g.settings.update { it.copy(touchSound = on) } }
+        }
     }
 }
 
+/**
+ * Phase 2 (settings audit): this screen used to offer an "App language" picker that did
+ * nothing — the value was saved and never read anywhere, so the UI never changed language.
+ * A real runtime language switch needs a full localization pass (every string in a table),
+ * which is out of scope, so the fake picker is REMOVED. What remains is the speech
+ * language, which genuinely works (dictation + voice calls read it).
+ */
 @Composable
 fun LanguageScreen(vm: ChatViewModel, back: () -> Unit) {
     val s = settingsOf(vm)
-    SettingsPage("App Language", back) {
-        SectionLabel("App language")
-        SettingsGroup {
-            listOf("English", "اردو (Urdu)", "हिन्दी (Hindi)").forEach { l ->
-                SettingsRow(null, l, chevron = false, trailing = { Check(s.appLanguage == l) }) { vm.g.settings.update { it.copy(appLanguage = l) } }
-            }
-        }
-        SectionLabel("Speech language (mic + read aloud)")
+    SettingsPage("Speech language", back) {
+        SectionLabel("Speech language (mic + voice calls)")
         SettingsGroup {
             listOf("ur-PK" to "Urdu (Pakistan)", "hi-IN" to "Hindi", "en-US" to "English").forEach { (id, l) ->
                 SettingsRow(null, l, chevron = false, trailing = { Check(s.speechLang == id) }) { vm.g.settings.update { it.copy(speechLang = id) } }

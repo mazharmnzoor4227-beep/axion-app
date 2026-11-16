@@ -50,10 +50,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** Grok user bubble: right-aligned #242424, 22dp corners with a 6dp bottom-right, 12dp from the edge, 16sp text. */
+/** Axion user bubble: right-aligned indigo, 20dp corners with a 4dp bottom-right, 12dp from the edge, 16sp text. */
 @Composable
 fun UserBubble(m: Message, onLongPress: () -> Unit = {}) {
     val p = P
+    // Phase 2: a pasted or model-echoed message that arrives URL-encoded renders decoded.
+    val text = remember(m.text) { decodeIfEncoded(m.text) }
     Column(Modifier.fillMaxWidth().padding(start = 64.dp, end = 12.dp, top = 10.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
         if (m.attachments.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -61,10 +63,10 @@ fun UserBubble(m: Message, onLongPress: () -> Unit = {}) {
             }
             Spacer(Modifier.height(6.dp))
         }
-        if (m.text.isNotBlank()) {
+        if (text.isNotBlank()) {
             SelectionContainer {
-                Text(m.text, style = Type.body, color = p.text,
-                    modifier = Modifier.clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 6.dp)).background(p.card)
+                Text(text, style = Type.body, color = p.onAccent,
+                    modifier = Modifier.clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 4.dp)).background(p.accent)
                         .padding(horizontal = 16.dp, vertical = 12.dp))
             }
         }
@@ -98,7 +100,7 @@ fun sizeLabel(b: Long) = when { b >= 1_048_576 -> "%.1f MB".format(b / 1_048_576
 
 fun durationLabel(ms: Long): String { val s = (ms / 1000).coerceAtLeast(1); return if (s >= 60) "${s / 60}m ${s % 60}s" else "${s}s" }
 
-/** One run of same-kind steps, shown the way Grok groups them ("Loaded 1 skill", "Running 2 commands"). */
+/** One run of same-kind steps, shown the way Axion groups them ("Loaded 1 skill", "Running 2 commands"). */
 internal data class StepRun(val kind: StepKind, val steps: List<Step>)
 
 internal fun runsOf(steps: List<Step>): List<StepRun> {
@@ -129,7 +131,7 @@ internal fun runLabel(r: StepRun): String {
     }
 }
 
-/** Grok assistant turn: no bubble, 16dp margins; Thinking header → grouped steps → Bash cards → answer → actions. */
+/** Axion assistant turn: no bubble, 16dp margins; Thinking header → grouped steps → Bash cards → answer → actions. */
 @Composable
 fun AssistantMessage(
     m: Message, isLast: Boolean, speaking: Boolean,
@@ -140,7 +142,10 @@ fun AssistantMessage(
 ) {
     val p = P
     val streaming = m.status == MsgStatus.STREAMING
-    // v0.3.1: Grok's reply column is 12 dp from each screen edge (measured), not 16.
+    // Phase 2: decode before anything else — a URL-encoded answer renders as its text,
+    // and the Sources extraction runs on the decoded text too.
+    val text = remember(m.text) { decodeIfEncoded(m.text) }
+    // v0.3.1: Axion's reply column is 12 dp from each screen edge (measured), not 16.
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         if (m.plan.isNotEmpty()) { PlanCard(m.plan); Spacer(Modifier.height(10.dp)) }   // axion-p2
         if (m.steps.isNotEmpty() || m.reasoning.isNotBlank() || streaming) ThoughtsHeader(m, onOpenThoughts)
@@ -161,21 +166,21 @@ fun AssistantMessage(
         }
         val pages = m.steps.count { it.kind == StepKind.BROWSE && it.status == StepStatus.DONE }
         if (pages > 0 && !streaming) { Spacer(Modifier.height(10.dp)); SourcesPill(pages, onOpenThoughts) }
-        // Grok puts the document card first, then the words about it; images stay under the text.
+        // Axion puts the document card first, then the words about it; images stay under the text.
         val (docs, images) = m.artifacts.partition { !it.mime.startsWith("image/") }
         docs.forEach { a -> Spacer(Modifier.height(12.dp)); ArtifactCard(a, { onOpenFile(a) }, { onDownload(a) }) }
         // P1-6: a deep-research report's Sources list is shown as its own card in chat, not
         // only in the saved .md file. The "## Sources" section is taken out of the markdown
         // body (it is the last section of a research report) and rendered as this list.
-        val sources = remember(m.text) { CitationCheck.extractSources(m.text) }
-        val bodyText = remember(m.text, sources) {
-            if (sources.isEmpty()) m.text else {
-                val idx = Regex("\n## Sources\\s*\n").find(m.text)?.range?.first
-                    ?: Regex("^## Sources\\s*\n").find(m.text)?.range?.first
-                if (idx == null) m.text else m.text.substring(0, idx).trimEnd().ifBlank { m.text }
+        val sources = remember(text) { CitationCheck.extractSources(text) }
+        val bodyText = remember(text, sources) {
+            if (sources.isEmpty()) text else {
+                val idx = Regex("\n## Sources\\s*\n").find(text)?.range?.first
+                    ?: Regex("^## Sources\\s*\n").find(text)?.range?.first
+                if (idx == null) text else text.substring(0, idx).trimEnd().ifBlank { text }
             }
         }
-        if (m.text.isNotBlank()) { Spacer(Modifier.height(12.dp)); Markdown(bodyText) }
+        if (text.isNotBlank()) { Spacer(Modifier.height(12.dp)); Markdown(bodyText) }
         if (sources.isNotEmpty() && !streaming) { Spacer(Modifier.height(12.dp)); SourcesList(sources) }
         if (m.usedTools.isNotEmpty()) Text((if (m.usedTools.size == 1) "Used tool: " else "Used tools: ") + m.usedTools.joinToString(", "), style = Type.small.copy(fontSize = 13.sp), color = p.text3, modifier = Modifier.padding(top = 10.dp))   // axion-p3
         images.forEach { a -> Spacer(Modifier.height(14.dp)); ImageArtifact(a, { onOpenFile(a) }, { onDownload(a) }) }
@@ -260,7 +265,7 @@ fun StepLine(s: Step, compact: Boolean = false) {
 }
 
 /**
- * Grok's Bash card: hairline-rimmed #111111 card, 14dp corners, "▢ Bash" header with copy at right, then the
+ * Axion's Bash card: hairline-rimmed #111111 card, 14dp corners, "▢ Bash" header with copy at right, then the
  * script in Google Sans Code (shell lines khaki #CACBB2, code/strings salmon #B38F82) clipped to ~6 lines with
  * a fade; tap to expand. The command ran hidden in the sandbox — this card is only the record.
  */
@@ -349,7 +354,7 @@ private fun SourcesList(sources: List<CitationCheck.CitedSource>) {
 }
 
 /**
- * v0.3.1 — Grok's PDF deliverable (mazhar's 10:33 recording): no header, just page 1 filling the reply width in a 16 dp
+ * v0.3.1 — Axion's PDF deliverable (mazhar's 10:33 recording): no header, just page 1 filling the reply width in a 16 dp
  * rounded card, and a dark "PDF" tag (99×60 dp, 15 dp corners, 22 sp) centred 43 dp above the card's bottom edge.
  * Tap → Axion's own viewer (every page, share, download). Other files keep the named card.
  */
@@ -373,7 +378,7 @@ fun ArtifactCard(a: Artifact, onOpen: () -> Unit, onDownload: () -> Unit) {
     val shape = RoundedCornerShape(18.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(p.surface).border(1.dp, p.border, shape).clickable(onClick = onOpen)) {
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            GkIcon(Gk.file, null, 22.dp, p.text2)
+            GkIcon(Gk.file, null, 22.dp, p.accent)
             Spacer(Modifier.width(10.dp))
             Text(a.name, style = Type.body.copy(fontWeight = FontWeight.Medium), color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             IconTap(Gk.download, "Download", 20.dp, p.text2, 40.dp, onDownload)
@@ -442,7 +447,7 @@ private fun ErrorCard(msg: String) {
 }
 
 /**
- * Grok action row (v0.3.1, measured): copy · share · 👍 · 👎 · read-aloud · regenerate — 18 dp grey glyphs on a 48 dp
+ * Axion action row (v0.3.1, measured): copy · share · 👍 · 👎 · read-aloud · regenerate — 18 dp grey glyphs on a 48 dp
  * pitch, the first glyph centred 24 dp from the screen edge (so the row starts 12 dp left of the text).
  */
 @Composable

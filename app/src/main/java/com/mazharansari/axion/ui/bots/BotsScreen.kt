@@ -1,5 +1,7 @@
 package com.mazharansari.axion.ui.bots
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +53,7 @@ import com.mazharansari.axion.ui.components.GkIcon
 import com.mazharansari.axion.ui.theme.P
 
 /**
- * PHASE 1 SWARM — the Bots section (tab 3, next to Ask/Imagine/Build).
+ * PHASE 1 SWARM — the Bots section (opened from the hamburger menu, Phase 2).
  *
  * Any bot can create another bot, and the user (or the creating bot) NAMES it — "CEO" is
  * just one possible name, not a built-in role. There is no hardcoded CEO bot: a parent
@@ -61,6 +64,14 @@ import com.mazharansari.axion.ui.theme.P
  * opens the parent chat. The section starts empty — no demo bots.
  * Original Axion code; no code copied from any other project.
  */
+@Composable
+fun BotsScreen(vm: ChatViewModel, navigate: (Route) -> Unit, back: () -> Unit) {
+    val p = P
+    Column(Modifier.fillMaxSize().background(p.bg)) {
+        com.mazharansari.axion.ui.components.ScreenHeader("Bots", back)
+        BotsPane(vm, navigate, onStartBot = { bot -> vm.startBotChat(bot); back() })
+    }
+}
 @Composable
 fun BotsPane(vm: ChatViewModel, navigate: (Route) -> Unit, onStartBot: (BotDefinition) -> Unit) {
     val p = P
@@ -75,14 +86,13 @@ fun BotsPane(vm: ChatViewModel, navigate: (Route) -> Unit, onStartBot: (BotDefin
     val finished = chatIndex.filter { it.section == "worker" && bots.none { b -> b.conversationId == it.id } }
 
     Column(Modifier.fillMaxSize().background(p.bg).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Text("Bots", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = p.text)
         Text("Every live bot — and every bot you installed. Nothing about workers is hidden.",
             fontSize = 13.sp, color = p.text2, modifier = Modifier.padding(top = 2.dp, bottom = 12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ActionChip("Bot Store", Gk.grid, Modifier.weight(1f)) { navigate(Route.BotStore) }
-            ActionChip("New bot", Gk.plus, Modifier.weight(1f)) { showCreate = true }
+            ActionChip("New bot", Gk.plus, Modifier.weight(1f), primary = true) { showCreate = true }
         }
-        if (showCreate) CreateBotCard(vm) { showCreate = false }
+        if (showCreate) CreateBotCard(vm, onStartBot = onStartBot) { showCreate = false }
 
         SectionLabel("Live")
         if (parents.isEmpty() && workers.isEmpty()) {
@@ -111,7 +121,9 @@ fun BotsPane(vm: ChatViewModel, navigate: (Route) -> Unit, onStartBot: (BotDefin
                 fontSize = 13.sp, color = p.text3, modifier = Modifier.padding(vertical = 6.dp))
         }
         myBots.forEach { def ->
-            BotDefCard(def, onStart = { onStartBot(def) }, onRemove = { vm.g.botStore.remove(def.id) })
+            BotDefCard(def, onStart = { onStartBot(def) }, onRemove = { vm.g.botStore.remove(def.id) },
+                onLogo = { logo -> vm.g.botStore.setLogo(def.id, logo) },
+                onLogoFailed = { vm.toast = "Could not save that image" })
             Spacer(Modifier.height(8.dp))
         }
 
@@ -142,14 +154,16 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun ActionChip(label: String, icon: Int, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun ActionChip(label: String, icon: Int, modifier: Modifier = Modifier, primary: Boolean = false, onClick: () -> Unit) {
     val p = P
-    Row(modifier.clip(RoundedCornerShape(12.dp)).background(p.card).border(1.dp, p.border, RoundedCornerShape(12.dp))
+    Row(modifier.clip(RoundedCornerShape(12.dp))
+        .background(if (primary) p.accent else p.card)
+        .border(1.dp, if (primary) p.accent else p.border, RoundedCornerShape(12.dp))
         .clickable(onClick = onClick).padding(vertical = 11.dp),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        GkIcon(icon, label, 18.dp, p.text)
+        GkIcon(icon, label, 18.dp, if (primary) p.onAccent else p.text)
         Spacer(Modifier.width(6.dp))
-        Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = p.text)
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (primary) p.onAccent else p.text)
     }
 }
 
@@ -220,11 +234,23 @@ private fun WorkerCard(worker: BotRun, parentName: String, indent: Boolean, onOp
 }
 
 @Composable
-private fun BotDefCard(def: BotDefinition, onStart: () -> Unit, onRemove: () -> Unit) {
+private fun BotDefCard(def: BotDefinition, onStart: () -> Unit, onRemove: () -> Unit, onLogo: (String) -> Unit, onLogoFailed: () -> Unit) {
     val p = P
+    val ctx = LocalContext.current
+    var pickingLogo by remember { mutableStateOf(false) }
+    // Phase 2: pick a gallery image as this bot's logo — copied into the app's own
+    // storage, so it survives the gallery permission being revoked.
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            val path = saveBotLogo(ctx, def.id, uri)
+            if (path != null) { onLogo(com.mazharansari.axion.data.BotLogo.custom(path)); pickingLogo = false }
+            else onLogoFailed()
+        }
+    }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.card).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
+            Box(Modifier.clickable { pickingLogo = true }) { BotLogoView(def.logo, def.name, 44.dp) }
+            Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(def.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(def.description, fontSize = 13.sp, color = p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
@@ -234,19 +260,70 @@ private fun BotDefCard(def: BotDefinition, onStart: () -> Unit, onRemove: () -> 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (def.sourceName.isNotBlank()) "${def.sourceName}${if (def.license.isNotBlank()) " · ${def.license}" else ""}" else "Your bot",
                 fontSize = 12.sp, color = p.text3, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TextButton(onClick = { pickingLogo = true }) { Text("Change logo", color = p.text2, fontSize = 12.sp) }
             GkIcon(Gk.trash, "Remove bot", 18.dp, p.text3, modifier = Modifier.clickable(onClick = onRemove).padding(4.dp))
+        }
+    }
+    if (pickingLogo) LogoPickerSheet(def,
+        onPickBuiltin = { id -> onLogo(com.mazharansari.axion.data.BotLogo.builtin(id)); pickingLogo = false },
+        onPickGallery = { pickImage.launch("image/*") },
+        onClear = { onLogo(""); pickingLogo = false },
+        onDismiss = { pickingLogo = false })
+}
+
+/** Phase 2 — change a bot's logo: a built-in icon, a gallery photo, or no logo. */
+@Composable
+private fun LogoPickerSheet(def: BotDefinition, onPickBuiltin: (String) -> Unit, onPickGallery: () -> Unit, onClear: () -> Unit, onDismiss: () -> Unit) {
+    val p = P
+    val current = com.mazharansari.axion.data.BotLogo.parse(def.logo)
+    com.mazharansari.axion.ui.components.AxionSheet(onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+            Text("Logo for ${def.name}", style = com.mazharansari.axion.ui.theme.Type.title, color = p.text)
+            Spacer(Modifier.height(14.dp))
+            // Built-in icons, 4 across.
+            val builtins = com.mazharansari.axion.data.BotLogo.BUILTINS
+            builtins.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    row.forEach { b ->
+                        val selected = (current as? com.mazharansari.axion.data.BotLogo.Builtin)?.id == b.id
+                        Column(Modifier.clickable { onPickBuiltin(b.id) }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(Modifier.size(52.dp).clip(CircleShape)
+                                .background(if (selected) p.accent.copy(alpha = 0.16f) else p.chip)
+                                .border(1.dp, if (selected) p.accent else p.border, CircleShape),
+                                contentAlignment = Alignment.Center) {
+                                GkIcon(builtinIcon(b.id), b.label, 26.dp, if (selected) p.accent else p.text2)
+                            }
+                            Text(b.label, style = com.mazharansari.axion.ui.theme.Type.tiny, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.card).clickable(onClick = onPickGallery).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                GkIcon(Gk.image, "Gallery", 22.dp, p.accent); Spacer(Modifier.width(12.dp))
+                Text("Choose from gallery", style = com.mazharansari.axion.ui.theme.Type.row, color = p.text, modifier = Modifier.weight(1f))
+                GkIcon(Gk.chevronRight, null, 18.dp, p.text3)
+            }
+            if (current != com.mazharansari.axion.data.BotLogo.None) {
+                TextButton(onClick = onClear, modifier = Modifier.padding(top = 6.dp)) { Text("Remove logo", color = p.danger) }
+            }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 /** Create a bot and name it anything — "CEO" is just the owner's example name. */
 @Composable
-private fun CreateBotCard(vm: ChatViewModel, onDone: () -> Unit) {
+private fun CreateBotCard(vm: ChatViewModel, onStartBot: (BotDefinition) -> Unit, onDone: () -> Unit) {
     val p = P
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var persona by remember { mutableStateOf("") }
     var provider by remember { mutableStateOf<String?>(null) }
+    // Phase 2: pick the bot's logo at creation (built-in icon; gallery comes later from its card).
+    var logo by remember { mutableStateOf("brain") }
     val providers = listOf(null to "Auto", "Google Gemini" to "Gemini", "Groq" to "Groq", "OpenRouter" to "OpenRouter", "xAI Grok" to "Grok")
     val colors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = p.text2, unfocusedBorderColor = p.border,
@@ -254,13 +331,29 @@ private fun CreateBotCard(vm: ChatViewModel, onDone: () -> Unit) {
         cursorColor = p.text, focusedLabelColor = p.text2, unfocusedLabelColor = p.text3)
     Column(Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(16.dp)).background(p.card).padding(14.dp)) {
         Text("New bot", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = p.text)
-        Text("Name it anything. A bot that spawns workers is the parent for its run — the name is what makes it the boss, not a built-in role.",
+        Text("Name it anything. A bot that spawns workers is the parent for its run — the name is what makes it the boss, not a built-in role. Tell it its role in chat (\"You are the CEO — manage everything\") and it will spawn a worker bot per task.",
             fontSize = 13.sp, color = p.text2, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
         OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, colors = colors, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(description, { description = it }, label = { Text("What it does") }, singleLine = true, colors = colors, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(persona, { persona = it }, label = { Text("How it should work (persona)") }, minLines = 3, colors = colors, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(10.dp))
+        Text("Logo", fontSize = 12.sp, color = p.text3)
+        val builtins = com.mazharansari.axion.data.BotLogo.BUILTINS
+        builtins.chunked(6).forEach { row ->
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { b ->
+                    val selected = logo == b.id
+                    Box(Modifier.size(40.dp).clip(CircleShape)
+                        .background(if (selected) p.accent.copy(alpha = 0.16f) else p.chip)
+                        .border(1.dp, if (selected) p.accent else p.border, CircleShape)
+                        .clickable { logo = b.id }, contentAlignment = Alignment.Center) {
+                        GkIcon(builtinIcon(b.id), b.label, 20.dp, if (selected) p.accent else p.text2)
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(10.dp))
         Text("Preferred provider (free)", fontSize = 12.sp, color = p.text3)
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -280,8 +373,12 @@ private fun CreateBotCard(vm: ChatViewModel, onDone: () -> Unit) {
             Button(
                 onClick = {
                     val created = vm.g.botStore.create(name, description, persona, provider)
-                    vm.toast = "Bot '${created.name}' created — find it in Your bots"
+                    val logoStr = com.mazharansari.axion.data.BotLogo.builtin(logo)
+                    vm.g.botStore.setLogo(created.id, logoStr)
                     onDone()
+                    // Phase 2: creating a bot opens its chat at once — the user names it
+                    // and tells it its role there ("tum CEO ho…"), and it spawns workers.
+                    onStartBot(created.copy(logo = logoStr))
                 },
                 enabled = name.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent),

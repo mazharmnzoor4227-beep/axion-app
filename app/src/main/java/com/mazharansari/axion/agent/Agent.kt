@@ -500,7 +500,10 @@ class Agent(
                     appendLine("- TERMINAL: run_command is a fresh shell each time (quick one-off commands). shell_session is ONE persistent shell — cd and exported variables survive between calls; use it for multi-step work in one place. run_background + job_output + job_kill are for commands that take many minutes (builds, downloads, servers) so the chat is not blocked.")
                     appendLine("- Load the matching skill (load_skill) before a specialised task. A GitHub URL with skills → install_skills_from_github.")
                     appendLine("- Safe steps need no permission; ask before anything destructive, paid or public. Finish with a short summary of what you did.")
-                    val skillList = skills.skills.value.filter { it.enabled }.joinToString("\n") { "  - ${it.name}: ${it.description.take(100)}" }
+                    // Phase 2 (token efficiency): the skill list used to be unbounded
+                    // (every enabled skill + 100 chars of description in every prompt).
+                    // SkillListPrompt caps it; names always stay visible for discovery.
+                    val skillList = SkillListPrompt.render(skills.skills.value.filter { it.enabled }.map { it.name to it.description })
                     if (skillList.isNotBlank()) { appendLine("Skills:"); appendLine(skillList) }
                     val mcp = tools.filter { it.spec.name.startsWith("mcp_") }.map { it.spec.description.substringBefore("]").removePrefix("[") }.distinct()
                     if (mcp.isNotEmpty()) appendLine("MCP servers (tools prefixed mcp_): ${mcp.joinToString()}")

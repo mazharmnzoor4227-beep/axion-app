@@ -39,7 +39,7 @@ fun ToolsLibraryScreen(vm: ChatViewModel, nav: (Route) -> Unit, back: () -> Unit
                 val enabled = ToolCatalog.isEnabled(g, s.toolSwitches)
                 val change = { v: Boolean -> vm.g.settings.update { it.copy(toolSwitches = it.toolSwitches + (g.id to v)) } }
                 SettingsRow(iconFor(g), g.title, g.description + if (g.note.isNotBlank()) "\n" + g.note else "", chevron = false,
-                    trailing = { Spacer(Modifier.width(14.dp)); GrokSwitch(enabled, change) }, onClick = { change(!enabled) })
+                    trailing = { Spacer(Modifier.width(14.dp)); AxionSwitch(enabled, change) }, onClick = { change(!enabled) })
             }
         }
     }

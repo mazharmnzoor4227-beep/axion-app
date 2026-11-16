@@ -51,8 +51,13 @@ fun BotStoreScreen(vm: ChatViewModel, back: () -> Unit) {
             val isIn = installed.any { it.id == seed.id }
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)
                 .clip(RoundedCornerShape(16.dp)).background(p.card).padding(14.dp)) {
-                Text(seed.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = p.text)
-                Text(seed.description, fontSize = 13.sp, color = p.text2, modifier = Modifier.padding(top = 2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BotLogoView(seed.logo, seed.name, 44.dp)
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(seed.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = p.text)
+                        Text(seed.description, fontSize = 13.sp, color = p.text2, modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
                 Text("Source: ${seed.sourceName} · ${seed.license}", fontSize = 12.sp, color = p.text3, modifier = Modifier.padding(top = 6.dp))
                 if (seed.sourceUrl.isNotBlank()) Text(seed.sourceUrl, fontSize = 12.sp, color = p.text3)
                 if (seed.skills.isNotEmpty()) Text("Skills: ${seed.skills.joinToString(", ")}", fontSize = 12.sp, color = p.text3, modifier = Modifier.padding(top = 2.dp))

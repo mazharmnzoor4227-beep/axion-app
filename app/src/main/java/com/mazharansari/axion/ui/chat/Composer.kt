@@ -33,9 +33,9 @@ import com.mazharansari.axion.ui.theme.P
 import com.mazharansari.axion.ui.theme.Type
 
 /**
- * Grok's composer, measured off the recordings: 8dp side margins, #1F1F1F fill, 1dp #2D2D2D rim, 20dp corners,
+ * Axion's composer (Phase 2: own design, not a copy): 8dp side margins, surface fill, 1dp border rim, 24dp corners,
  * 17sp "Ask anything" placeholder 16dp in, then one 36dp control row 6dp from the edge:
- * (+) circle · [⚡ Fast ⌄] chip ……… (mic) circle · [≋ Speak] white pill → (↑) when there is text → (■) while running.
+ * (+) circle · [⚡ Fast ⌄] chip ……… (mic) circle · [≋ Speak] accent pill → (↑) when there is text → (■) while running.
  */
 @Composable
 fun Composer(
@@ -45,11 +45,17 @@ fun Composer(
     onPlus: () -> Unit, onMode: () -> Unit, onMic: () -> Unit, onSend: () -> Unit, onStop: () -> Unit, onVoiceCall: () -> Unit,
     modifier: Modifier = Modifier, plusOpen: Boolean = false, modeOpen: Boolean = false, compact: Boolean = false,
     onMicCancel: () -> Unit = onMic,
+    /** Phase 2 voice: true while the final words are coming back — the mic ignores taps meanwhile. */
+    finishing: Boolean = false,
+    /** Phase 2 voice: finish listening AND send the message in one tap (the old ✓ only filled the draft). */
+    onMicSend: () -> Unit = onMic,
+    /** Phase 2 voice: the recogniser's soft line ("Didn't catch that" / reconnecting…). */
+    softMessage: String = "",
     /** v0.5.2 speed: the field got focus or the first character was typed — warm up the connection. */
     onFocus: () -> Unit = {},
 ) {
     val p = P
-    val shape = RoundedCornerShape(if (compact) 28.dp else 20.dp)
+    val shape = RoundedCornerShape(if (compact) 28.dp else 24.dp)
     Column(modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(shape).background(p.surface).border(1.dp, p.border, shape)) {
         if (attachments.isNotEmpty()) {
             Row(Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -66,18 +72,27 @@ fun Composer(
             }
             return@Column
         }
-        // v0.3.1 (Grok, measured): text line 13 dp below the top, control row 16 dp under it, 7 dp from the bottom → 95 dp box.
+        // Axion: text line 13 dp below the top, control row 16 dp under it, 7 dp from the bottom → 95 dp box.
         Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 13.dp, bottom = 16.dp).heightIn(min = 24.dp, max = 168.dp)) {
             Field(text, onText, placeholder, listening, partial, maxLines = 7, onFocus = onFocus)
         }
         if (listening) {
-            // Grok dictation row: (×) cancel · dotted line + live bars · (✓) done
+            // Phase 2 voice: (×) cancel · live bars · (↑) Send. One tap on the mic
+            // opened listening; speaking fills the live transcript above; Send
+            // finishes AND sends in the same tap — the old ✓ only filled the
+            // draft, so the message needed a second, separate send tap.
             Row(Modifier.fillMaxWidth().padding(start = 7.dp, end = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 RoundTool(Gk.close, "Cancel dictation", onMicCancel)
                 // Kodex's waveform: frame-loop driven, reads the mic level once per frame, no recomposition per RMS event.
-                com.mazharansari.axion.ui.voice.LiveWaveform(level, Modifier.weight(1f).height(36.dp).padding(start = 16.dp, end = 10.dp), color = p.text)
-                Box(Modifier.size(36.dp).clip(CircleShape).background(p.accent).clickable(onClick = onMic), contentAlignment = Alignment.Center) { GkIcon(Gk.check, "Done", 20.dp, p.onAccent) }
+                com.mazharansari.axion.ui.voice.LiveWaveform(level, Modifier.weight(1f).height(36.dp).padding(start = 16.dp, end = 10.dp), color = p.accent)
+                val sendTap = rememberTap(onMicSend)
+                Box(Modifier.size(44.dp).clip(CircleShape).background(if (finishing) p.chip else p.accent)
+                    .clickable(enabled = !finishing, onClick = sendTap), contentAlignment = Alignment.Center) {
+                    GkIcon(Gk.send, "Send voice message", 20.dp, if (finishing) p.text3 else p.onAccent)
+                }
             }
+            if (softMessage.isNotBlank()) Text(softMessage, style = Type.tiny, color = p.text2,
+                modifier = Modifier.padding(start = 52.dp, end = 12.dp, bottom = 8.dp))
             return@Column
         }
         Row(Modifier.fillMaxWidth().padding(start = 7.dp, end = 10.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -101,13 +116,13 @@ private fun Field(text: String, onText: (String) -> Unit, placeholder: String, l
     if (listening) {
         Text(partial.ifBlank { "Listening…" }, style = style, color = p.text2, maxLines = 3)
     } else Box {
-        if (text.isEmpty()) Text(placeholder, style = style, color = Color(0xFF8E8E8E).takeIf { p.isDark } ?: p.text3, maxLines = 1)
+        if (text.isEmpty()) Text(placeholder, style = style, color = p.text3, maxLines = 1)
         BasicTextField(text, { t -> if (text.isEmpty() && t.isNotEmpty()) onFocus(); onText(t) }, textStyle = style.copy(color = p.text), cursorBrush = SolidColor(p.text), maxLines = maxLines,
             modifier = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) onFocus() })
     }
 }
 
-/** 36dp #282828 circle holding a 22dp Grok glyph (the + and the mic). */
+/** 36dp chip circle holding a 20dp glyph (the + and the mic). */
 @Composable
 fun RoundTool(icon: Int, desc: String, onClick: () -> Unit, active: Boolean = false) {
     val p = P; val tap = rememberTap(onClick)
@@ -119,7 +134,7 @@ fun RoundTool(icon: Int, desc: String, onClick: () -> Unit, active: Boolean = fa
 @Composable
 private fun ModeChip(label: String, open: Boolean, onClick: () -> Unit) {
     val p = P; val tap = rememberTap(onClick)
-    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(if (open) Color(0xFF363636).takeIf { p.isDark } ?: p.border else p.chip).clickable(onClick = tap).padding(start = 12.dp, end = 10.dp),
+    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(if (open) p.surface2 else p.chip).clickable(onClick = tap).padding(start = 12.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         GkIcon(modeIcon(label), null, 18.dp, p.text)
         Spacer(Modifier.width(6.dp))

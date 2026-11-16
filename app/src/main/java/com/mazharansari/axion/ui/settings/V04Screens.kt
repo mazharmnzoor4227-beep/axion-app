@@ -535,7 +535,7 @@ fun QuotaScreen(vm: ChatViewModel, back: () -> Unit, nav: (Route) -> Unit) {
             Row(Modifier.padding(start = 30.dp, end = 22.dp, top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("ANTIGRAVITY", style = Type.small.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, fontSize = 13.sp), color = p.text2, modifier = Modifier.weight(1f))
                 Text("Auto", style = Type.small, color = p.text2); Spacer(Modifier.width(8.dp))
-                GrokSwitch(store.autoSwitch) { g.agy.setAutoSwitch(it) }
+                AxionSwitch(store.autoSwitch) { g.agy.setAutoSwitch(it) }
             }
             if (m.agy.isEmpty()) Card {
                 Text("No Antigravity account yet", style = Type.row, color = p.text)

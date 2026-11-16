@@ -13,28 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-/** UI state for the inline voice input panel. */
-data class VoiceInputState(
-    val listening: Boolean = false,
-    /** Segments the recogniser has already finalised. */
-    val committed: String = "",
-    /** Live words from the current, still-open segment. */
-    val partial: String = "",
-    /** Fatal problem, human wording first (permission, unavailable). Pauses are not errors. */
-    val error: String? = null,
-    /** Raw SpeechRecognizer error code behind [error], for support. */
-    val errorCode: Int? = null,
-    /** True while a dropped voice service is being reconnected automatically. */
-    val reconnecting: Boolean = false,
-    /** Human line shown while [reconnecting] (e.g. "Voice service dropped — reconnecting…"). */
-    val reconnectMessage: String? = null,
-    /** Soft, non-fatal line (e.g. "Didn't catch that") — a pause the user may want to see. */
-    val softMessage: String? = null,
-) {
-    val fullText: String
-        get() = listOf(committed, partial).filter { it.isNotBlank() }.joinToString(" ").trim()
-}
-
 /**
  * Ported 1:1 from vayro/Kodex (ui/voice/VoiceRecognizer.kt), with the language taken from Axion's settings.
  * In-app speech recognition for the chat composer. Uses [SpeechRecognizer]
@@ -58,8 +36,10 @@ class VoiceRecognizer(context: Context, private val languageTag: () -> String = 
         private const val NOISE_FLOOR_DB = 1f
         private const val PEAK_DB = 10f
 
-        /** How long [finish] waits for the final words before completing anyway. */
-        private const val FINISH_TIMEOUT_MS = 1200L
+        /** How long [finish] waits for the final words before completing anyway.
+         * Phase 2: 2000 ms (was 1200) — on slower phones the last result can
+         * arrive after the old timeout, and its words were silently lost. */
+        private const val FINISH_TIMEOUT_MS = 2000L
 
         // v3.2.37 (A2): SpeechRecognizer.ERROR_SERVER_DISCONNECTED (11) is an
         // API 31+ constant; the literal is inlined here so older runtimes are
@@ -143,7 +123,12 @@ class VoiceRecognizer(context: Context, private val languageTag: () -> String = 
             onDone(_state.value.fullText)
             return
         }
+        // Phase 2: a second tap while finishing used to re-enter finish() and
+        // drop the words the first tap was collecting — the UI now sees
+        // finishing=true and ignores further mic taps until this completes.
+        if (finishing) return
         finishing = true
+        _state.update { it.copy(finishing = true) }
         finishCallback = onDone
         runCatching { recognizer?.stopListening() }
         mainHandler.postDelayed({ completeFinish() }, FINISH_TIMEOUT_MS)

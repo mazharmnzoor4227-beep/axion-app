@@ -21,6 +21,7 @@ object BotCatalog {
             sourceName = "OpenDots (CopilotKit)",
             sourceUrl = "https://github.com/CopilotKit/OpenDots",
             license = "MIT",
+            logo = BotLogo.builtin("person"),
         ),
         BotDefinition(
             id = "store-learner",
@@ -32,6 +33,7 @@ object BotCatalog {
             sourceName = "Hermes Agent (Nous Research)",
             sourceUrl = "https://github.com/NousResearch/hermes-agent",
             license = "MIT",
+            logo = BotLogo.builtin("brain"),
         ),
         BotDefinition(
             id = "store-researcher",
@@ -43,6 +45,7 @@ object BotCatalog {
             sourceName = "Hermes Agent (Nous Research)",
             sourceUrl = "https://github.com/NousResearch/hermes-agent",
             license = "MIT",
+            logo = BotLogo.builtin("globe"),
         ),
         BotDefinition(
             id = "store-coder",
@@ -54,6 +57,7 @@ object BotCatalog {
             sourceName = "Ponytail (Dietrich Gebert) + Mika",
             sourceUrl = "https://github.com/DietrichGebert/ponytail",
             license = "MIT + Apache-2.0",
+            logo = BotLogo.builtin("hammer"),
         ),
         BotDefinition(
             id = "store-reviewer",
@@ -65,6 +69,7 @@ object BotCatalog {
             sourceName = "Koog (JetBrains)",
             sourceUrl = "https://github.com/JetBrains/koog",
             license = "Apache-2.0",
+            logo = BotLogo.builtin("shield"),
         ),
         BotDefinition(
             id = "store-scheduler",
@@ -75,6 +80,7 @@ object BotCatalog {
             sourceName = "Hermes Agent (Nous Research)",
             sourceUrl = "https://github.com/NousResearch/hermes-agent",
             license = "MIT",
+            logo = BotLogo.builtin("bolt"),
         ),
     )
 }

@@ -90,9 +90,9 @@ object MdParser {
             when {
                 g[1] != null || g[2] != null -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(inline((g[1] ?: g[2])!!.value, p)) }
                 g[3] != null -> withStyle(SpanStyle(fontFamily = com.mazharansari.axion.ui.theme.GoogleSansCode, background = p.chip, fontSize = 14.sp)) { append(" ${g[3]!!.value} ") }
-                g[4] != null -> withLink(LinkAnnotation.Url(g[5]!!.value, TextLinkStyles(SpanStyle(color = p.text, textDecoration = TextDecoration.Underline)))) { append(g[4]!!.value) }
+                g[4] != null -> withLink(LinkAnnotation.Url(g[5]!!.value, TextLinkStyles(SpanStyle(color = p.accent, textDecoration = TextDecoration.Underline)))) { append(g[4]!!.value) }
                 g[6] != null -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(g[6]!!.value) }
-                g[7] != null -> withLink(LinkAnnotation.Url(g[7]!!.value, TextLinkStyles(SpanStyle(color = p.text, textDecoration = TextDecoration.Underline)))) { append(g[7]!!.value) }
+                g[7] != null -> withLink(LinkAnnotation.Url(g[7]!!.value, TextLinkStyles(SpanStyle(color = p.accent, textDecoration = TextDecoration.Underline)))) { append(g[7]!!.value) }
             }
             last = m.range.last + 1
         }
@@ -103,19 +103,28 @@ object MdParser {
 @Composable
 fun Markdown(text: String, modifier: Modifier = Modifier) {
     val p = P
-    val blocks = remember(text) { MdParser.parse(text) }
-    // v0.3.1: Grok spaces blocks 12 dp apart (bullet pitch 36 dp = 24 sp line + 12).
+    // Phase 2: a model/tool answer that arrives URL-encoded (the "%27%29%0A…" garbage
+    // from the 2026-11-16 screenshot) is decoded before parsing, so it renders as
+    // the text it was — never as raw percent-escapes.
+    val decoded = remember(text) { com.mazharansari.axion.ui.chat.decodeIfEncoded(text) }
+    val blocks = remember(decoded) { MdParser.parse(decoded) }
+    // Axion spaces blocks 12 dp apart (bullet pitch 36 dp = 24 sp line + 12).
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         blocks.forEach { b ->
             when (b) {
-                is MdBlock.Heading -> Text(
-                    remember(b.text, p) { MdParser.inline(b.text, p) },
-                    style = Type.body.copy(fontSize = when (b.level) { 1 -> 22.sp; 2 -> 19.sp; else -> 17.sp }, fontWeight = FontWeight.SemiBold, lineHeight = 28.sp),
-                    color = p.text, modifier = Modifier.padding(top = 4.dp),
-                )
+                is MdBlock.Heading -> Column {
+                    Text(
+                        remember(b.text, p) { MdParser.inline(b.text, p) },
+                        style = Type.body.copy(fontSize = when (b.level) { 1 -> 22.sp; 2 -> 19.sp; else -> 17.sp }, fontWeight = FontWeight.SemiBold, lineHeight = 28.sp),
+                        color = p.text, modifier = Modifier.padding(top = 4.dp),
+                    )
+                    // A top-level heading gets Axion's accent rule under it — the mark of
+                    // a master prompt / deep report, not a plain wall of text.
+                    if (b.level == 1) Box(Modifier.padding(top = 6.dp).size(width = 32.dp, height = 3.dp).clip(RoundedCornerShape(50)).background(p.accent))
+                }
                 is MdBlock.Para -> Text(remember(b.text, p) { MdParser.inline(b.text, p) }, style = Type.body, color = p.text)
                 is MdBlock.ListItem -> Row(Modifier.padding(start = (b.indent * 16).dp)) {
-                    // Grok: bullet 8 dp in, its text 19 dp in, both in the text colour
+                    // Axion: bullet 8 dp in, its text 19 dp in, both in the text colour
                     if (b.marker == "•") Box(Modifier.width(19.dp)) { Text("•", style = Type.body, color = p.text, modifier = Modifier.padding(start = 6.dp)) }
                     else Text(b.marker, style = Type.body, color = p.text, modifier = Modifier.width(24.dp))
                     Text(remember(b.text, p) { MdParser.inline(b.text, p) }, style = Type.body, color = p.text)
@@ -123,7 +132,7 @@ fun Markdown(text: String, modifier: Modifier = Modifier) {
                 is MdBlock.Code -> CodeBlock(b.lang, b.code)
                 is MdBlock.Table -> MdTable(b.rows)
                 is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
-                    Box(Modifier.width(3.dp).fillMaxHeight().background(p.border))
+                    Box(Modifier.width(3.dp).fillMaxHeight().background(p.accent))
                     Text(remember(b.text, p) { MdParser.inline(b.text, p) }, style = Type.body, color = p.text2, modifier = Modifier.padding(start = 12.dp))
                 }
                 MdBlock.Rule -> Box(Modifier.fillMaxWidth().height(1.dp).background(p.border))
