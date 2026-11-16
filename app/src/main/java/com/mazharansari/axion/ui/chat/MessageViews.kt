@@ -123,6 +123,7 @@ internal fun runLabel(r: StepRun): String {
         StepKind.ZIP -> "Extracted $n ${pl("archive")}"
         StepKind.PDF -> if (live) "Making PDF" else "Made $n ${pl("PDF")}"
         StepKind.MCP -> "Used $n ${pl("tool")}"
+        StepKind.WORKER -> if (live) "Working with $n ${pl("worker")}" else "Ran $n ${pl("worker")}"
         StepKind.THINK -> "Thinking"
         StepKind.OTHER -> "Used $n ${pl("tool")}"
     }
@@ -134,6 +135,8 @@ fun AssistantMessage(
     m: Message, isLast: Boolean, speaking: Boolean,
     onOpenThoughts: () -> Unit, onCopy: () -> Unit, onSpeak: () -> Unit, onRegenerate: () -> Unit, onShare: () -> Unit,
     onRate: (Int) -> Unit, onOpenFile: (Artifact) -> Unit, onDownload: (Artifact) -> Unit,
+    /** Swarm (Phase 1): a worker step opens that worker's own chat (worker conversation id). */
+    onOpenWorker: ((String) -> Unit)? = null,
 ) {
     val p = P
     val streaming = m.status == MsgStatus.STREAMING
@@ -144,7 +147,7 @@ fun AssistantMessage(
         if (streaming && m.notice.isNotBlank()) Text(m.notice, style = Type.small, color = p.text2, maxLines = 1, modifier = Modifier.padding(start = 30.dp, top = 2.dp))
         val runs = remember(m.steps) { runsOf(m.steps) }
         runs.forEachIndexed { i, r ->
-            if (r.kind == StepKind.COMMAND || r.kind == StepKind.WRITE || streaming) key(r.kind.name + i) {
+            if (r.kind == StepKind.COMMAND || r.kind == StepKind.WRITE || r.kind == StepKind.WORKER || streaming) key(r.kind.name + i) {
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable(onClick = onOpenThoughts)) {
                     GkIcon(stepIcon(r.kind), null, 18.dp, p.text2); Spacer(Modifier.width(12.dp))
@@ -152,7 +155,7 @@ fun AssistantMessage(
                 }
                 Column(Modifier.padding(start = 30.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (r.kind == StepKind.COMMAND) r.steps.forEach { s -> key(s.id) { BashCard(s) } }
-                    else (if (r.kind == StepKind.WRITE) r.steps else r.steps.takeLast(3)).forEach { s -> key(s.id) { ExpandableStep(s, 15) } }
+                    else (if (r.kind == StepKind.WRITE || r.kind == StepKind.WORKER) r.steps else r.steps.takeLast(3)).forEach { s -> key(s.id) { ExpandableStep(s, 15, onOpenWorker = onOpenWorker) } }
                 }
             }
         }
